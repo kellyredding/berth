@@ -1,0 +1,83 @@
+#!/usr/bin/env bash
+# Manages the self-signed identity that signs Berth: the release (the template
+# Berth.app and the berth binary) and every site app `berth sites build`
+# makes. It lives only in 1Password; nothing is kept in a keychain or on disk.
+#
+# Usage: bin/signing-identity create|show
+#
+#   create  Make the identity and store it in 1Password. Refuses if it exists.
+#   show    Print its SHA-1, read from 1Password.
+#
+# Run it from a real terminal: 1Password's approval does not reach a shell
+# without one, such as an agent's.
+set -euo pipefail
+
+ACCOUNT="${BERTH_SIGNING_OP_ACCOUNT:-example.1password.com}"
+VAULT="${BERTH_SIGNING_OP_VAULT:-VAULT}"
+TITLE="Berth Release Signing"
+
+case "${1:-}" in
+  create|show) ;;
+  *)
+    sed -n '2,13p' "$0" | sed 's/^# \{0,1\}//'
+    [[ "${1:-}" == "-h" || "${1:-}" == "--help" ]] || exit 2
+    exit 0
+    ;;
+esac
+
+die() { printf 'bin/signing-identity: %s\n' "$*" >&2; exit 1; }
+command -v op >/dev/null || die "the 1Password CLI (op) is not installed."
+
+# op gives up on the desktop app within a few seconds, often while its
+# approval prompt is still on screen, so wait for the approval to land.
+bs_wait_for_op() {
+  local attempt
+  for attempt in $(seq 1 40); do
+    op vault list --account "$ACCOUNT" >/dev/null 2>&1 && return 0
+    (( attempt == 1 )) && echo "Approve the 1Password prompt to continue..."
+    sleep 3
+  done
+  die "1Password never approved this shell."
+}
+
+case "$1" in
+  create)
+    bs_wait_for_op
+    if op item get "$TITLE" --account "$ACCOUNT" --vault "$VAULT" >/dev/null 2>&1; then
+      die "\"$TITLE\" already exists in $VAULT. A new identity changes every site app's signature once they are rebuilt with it; macOS ties a site app's notification permission and login item to that signature, so they may need granting again (inferred, not tested)."
+    fi
+
+    work="$(mktemp -d)"
+    trap 'rm -rf "${work:?}"' EXIT
+
+    /usr/bin/openssl req -x509 -newkey rsa:3072 -nodes \
+      -keyout "$work/key.pem" -out "$work/cert.pem" -days 3650 \
+      -subj "/CN=$TITLE" \
+      -addext "keyUsage=critical,digitalSignature" \
+      -addext "extendedKeyUsage=critical,codeSigning" \
+      -addext "basicConstraints=critical,CA:false" 2>/dev/null
+    p12pass="$(/usr/bin/openssl rand -hex 24)"
+    /usr/bin/openssl pkcs12 -export -inkey "$work/key.pem" -in "$work/cert.pem" \
+      -out "$work/signing.p12" -passout "pass:$p12pass" -name "$TITLE"
+    sha1="$(/usr/bin/openssl x509 -in "$work/cert.pem" -noout -fingerprint -sha1 | cut -d= -f2 | tr -d ':')"
+
+    # In op's assignment syntax a dot separates section from field, so
+    # `signing.p12[file]` is field `p12` in section `signing`, read back as
+    # op://VAULT/ITEM/signing/p12 by bin/lib/sign-app.sh.
+    op item create --account "$ACCOUNT" --vault "$VAULT" --category Password \
+      --title "$TITLE" \
+      "password=$p12pass" \
+      "sha1[text]=$sha1" \
+      "common name[text]=$TITLE" \
+      "notes[text]=Self-signed code-signing identity for Berth: signs the release (bin/release) and every site app berth sites build makes. Losing it means a new certificate; site apps rebuilt with it may ask again for their notification permission and login item (inferred, not tested)." \
+      "signing.p12[file]=$work/signing.p12" >/dev/null
+
+    stored="$(op item get "$TITLE" --account "$ACCOUNT" --vault "$VAULT" --fields label=sha1)"
+    [[ "$stored" == "$sha1" ]] || die "stored SHA-1 ($stored) does not match the new identity ($sha1)."
+    echo "Stored \"$TITLE\" in $VAULT ($ACCOUNT). SHA-1: $sha1"
+    ;;
+  show)
+    bs_wait_for_op
+    op item get "$TITLE" --account "$ACCOUNT" --vault "$VAULT" --fields label=sha1
+    ;;
+esac
