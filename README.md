@@ -1,4 +1,7 @@
-# Berth
+<h1 align="center">
+  <img src="BerthApp/BerthApp/Assets.xcassets/AppIcon.appiconset/icon_256.png" width="128" height="128" alt=""><br>
+  Berth
+</h1>
 
 Web pages as standalone Mac apps, with a CLI built for agents.
 

@@ -8,11 +8,12 @@ VERSION        := $(shell cat ../VERSION)
 LSREGISTER     := /System/Library/Frameworks/CoreServices.framework/Versions/Current/Frameworks/LaunchServices.framework/Versions/Current/Support/lsregister
 
 FIXTURE        := $(abspath ../fixtures/export.json)
+ICON_SET       := BerthApp/Assets.xcassets/AppIcon.appiconset
 
 XCODEBUILD     = xcodebuild -project BerthApp.xcodeproj -derivedDataPath $(DERIVED_DATA) \
                    MARKETING_VERSION=$(VERSION)
 
-.PHONY: all generate build smoke check release clean
+.PHONY: all generate build smoke check release clean icon
 
 all: build
 
@@ -33,9 +34,16 @@ smoke: generate
 
 check: build smoke
 
+# The template `berth sites build --template` takes in development:
+# build/Build/Products/Release/Berth.app.
 release: generate
 	$(XCODEBUILD) -scheme $(SCHEME) -configuration $(CONFIG_RELEASE) build
 	@$(LSREGISTER) -u "$(CURDIR)/$(DERIVED_DATA)/Build/Products/$(CONFIG_RELEASE)/$(APP_NAME).app" 2>/dev/null || true
+
+# Draws every size of the app icon from its geometry.
+icon:
+	swift Icon/berth-icon.swift "$(ICON_SET)"
+	@echo "Drew $(ICON_SET)"
 
 clean:
 	rm -rf $(DERIVED_DATA)
