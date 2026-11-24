@@ -36,7 +36,7 @@ Personal configs and their icons live outside the repository.
 
 ```bash
 make check       # CLI: lint + build + specs
-make app-check   # app: build + smoke (fails while there is no BerthApp/)
+make app-check   # app: build + smoke (BerthApp/Makefile's check)
 ```
 
 - **`make check` does not build the app.** A change touching both sides
@@ -51,6 +51,16 @@ make app-check   # app: build + smoke (fails while there is no BerthApp/)
   `Services/` or `Views/`.
 - `fixtures/config.json` and `fixtures/export.json` pin the config export for
   both sides. Never edit them to make one side's check pass.
+- The build is the template, `Berth.app`, which shows no site. A development
+  build runs a site with `BERTH_SITE=<site>` in its environment, with
+  `BERTH_ROOT`, `BERTH_CONFIG` and `BERTH_BINARY` pointing at a scratch
+  config and the dev CLI (`tools/berth/build/berth`); start its executable
+  (`BerthApp/build/Build/Products/Debug/Berth.app/Contents/MacOS/Berth`)
+  directly, record its pid, and quit it by that pid. The app logs to
+  `<runtime>/logs/<site>.log`.
+- The build unregisters `Berth.app` from Launch Services; after running a
+  development build, unregister it again (`lsregister -u <path>`), so it
+  never shadows an installed site app.
 - **The CLI never links OpenSSL.** Nothing in `tools/berth/src/` may require
   `digest`, `openssl` or anything else that loads Homebrew's libcrypto; a
   release binary must load only `/usr/lib` libraries (`otool -L`). Shell out

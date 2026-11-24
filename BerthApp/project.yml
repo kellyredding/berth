@@ -1,0 +1,58 @@
+name: BerthApp
+options:
+  bundleIdPrefix: com.kellyredding
+  deploymentTarget:
+    # WKWebsiteDataStore(forIdentifier:), one persistent store per site, is
+    # macOS 14 and later.
+    macOS: "14.0"
+
+targets:
+  # The template every site app is copied from: `berth sites build` copies
+  # Berth.app and stamps its Info.plist with the site (BerthSite), bundle
+  # identifier and name. Not LSUIElement: a site app is a regular Dock app.
+  Berth:
+    type: application
+    platform: macOS
+    sources:
+      - BerthApp
+    info:
+      path: BerthApp/Info.plist
+      properties:
+        CFBundleName: Berth
+        CFBundleDisplayName: Berth
+        CFBundleIdentifier: $(PRODUCT_BUNDLE_IDENTIFIER)
+        CFBundleVersion: $(CURRENT_PROJECT_VERSION)
+        CFBundleShortVersionString: $(MARKETING_VERSION)
+        CFBundlePackageType: APPL
+        CFBundleExecutable: $(EXECUTABLE_NAME)
+        LSMinimumSystemVersion: $(MACOSX_DEPLOYMENT_TARGET)
+        LSApplicationCategoryType: public.app-category.productivity
+        NSHighResolutionCapable: true
+        NSPrincipalClass: NSApplication
+        # A page asking for the camera or microphone without these keys
+        # crashes the app instead of prompting.
+        NSCameraUsageDescription: The page you are using asks to use the camera.
+        NSMicrophoneUsageDescription: The page you are using asks to use the microphone.
+    settings:
+      base:
+        PRODUCT_NAME: Berth
+        EXECUTABLE_NAME: Berth
+        PRODUCT_BUNDLE_IDENTIFIER: com.kellyredding.berth
+        # MARKETING_VERSION comes from the repository's VERSION via the Makefile.
+        CURRENT_PROJECT_VERSION: "1"
+        SWIFT_VERSION: "5.10"
+        # Not sandboxed: the app runs the berth CLI, listens on a socket under
+        # ~/.berth and saves downloads to ~/Downloads.
+        ENABLE_APP_SANDBOX: NO
+
+  # Compiles Models/ and nothing else, so everything there must stay
+  # Foundation-only.
+  BerthSmoke:
+    type: tool
+    platform: macOS
+    sources:
+      - BerthApp/Models
+      - BerthSmoke
+    settings:
+      base:
+        SWIFT_VERSION: "5.10"

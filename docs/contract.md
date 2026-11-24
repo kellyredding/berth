@@ -11,10 +11,9 @@ down here. Changing any section means changing both sides in the same commit.
 | Config export | `tools/berth/src/berth/config/export.cr` | `BerthApp/BerthApp/Models/SiteConfig.swift` |
 | Socket envelope and events | `tools/berth/src/berth/socket_client.cr` | `BerthApp/BerthApp/Models/Envelope.swift` |
 
-The app and the CLI's socket client do not exist yet; the files above are
-where they go. Until they do, the socket events below are the app's to
-implement, and the CLI commands that use them (`status`, `open`, `signin`)
-exit with a "not built yet" error.
+The CLI's socket client does not exist yet; until it does, the CLI commands
+that use the socket events (`status`, `open`, `signin`) exit with a "not
+built yet" error.
 
 `fixtures/config.json` and `fixtures/export.json` pin the export shape for
 both sides: the CLI specs assert that exporting the config yields the JSON
@@ -38,6 +37,10 @@ check pass; a mismatch means the contract changes first.
   `Berth.app`. A site app is a copy of it whose `Info.plist` names its site
   (`BerthSite`), with the bundle identifier `com.kellyredding.berth.<site>`
   and the site's `name`, icon and URL schemes.
+- **Which site an app shows:** `BerthSite` in its own `Info.plist`, else the
+  `BERTH_SITE` environment variable (how development runs a site from the
+  template's build), else none: the template only says that it must be built
+  per site with `berth sites build`.
 
 ## Paths
 
@@ -51,11 +54,10 @@ run against temporary directories.
 | Runtime dir | `<root>/runtime` | `BERTH_RUNTIME_DIR` |
 | A site app's socket | `<runtime>/<site>.sock` | — |
 | A site app's log | `<runtime>/logs/<site>.log` | — |
-| CLI binary (for the apps) | `<root>/bin/berth` | `BERTH_BINARY` |
+| CLI binary (for the apps) | `<root>/bin/berth`, then `~/.local/bin/berth` | `BERTH_BINARY` (the only one tried when set) |
 | Template app | `<root>/template/Berth.app` | — |
 | Install record | `<root>/installed-manifest.json` | — |
 | Site apps | `~/Applications/<name>.app` | `BERTH_APPLICATIONS_DIR` (the directory) |
-
 The template is never registered with Launch Services or launched. Each site
 app creates the runtime directories it needs; the CLI never assumes they
 exist.
@@ -260,25 +262,37 @@ or no reply; the app never sends it. The CLI waits 5 s for a reply.
 
 ### Events
 
-The app implements these; the details of each reply are settled when it is
-built, and recorded here then.
+Every key of a reply's `data` is always present, `null` when it has no
+value.
 
 | Event | `detail_data` | `data` on success |
 |---|---|---|
-| `status` | — | `{"version", "pid", "site", "url", "title", "config": {"loaded": bool, "state": "loading"\|"loaded"\|"failed", "error": string\|null}}` |
-| `open` | `{"url"?}` | `{"url"}`: brings the window forward, and loads `url` when given |
+| `status` | — | `{"version", "pid", "site", "url": string\|null, "title": string\|null, "badge": string\|null, "config": {"loaded": bool, "state": "loading"\|"loaded"\|"failed", "error": string\|null}}` |
+| `open` | `{"url"?}` | `{"url": string\|null, "opened_in": "app"\|"browser"}` |
 | `reload` | — | `{"loaded": bool, "error": string\|null}`: re-runs the export and applies the site's config |
 | `signin.fill` | `{"login", "steps": [{"flow", "username", "password"?, "code"?}]}` | `{"accepted": true}`: fills each step as its page appears |
 
-- `open` refuses a `url` whose host `keep` does not match (`bad_request`).
+- `status`: `url` and `title` are the main window's page now (null before
+  one loads), and `badge` its Dock badge (null when there is none).
+  `config.error` is the last load's failure, kept beside a last good config
+  (`"loaded": true`) or with none (`"state": "failed"`).
+- `open` without a `url` brings the window forward and is `"opened_in":
+  "app"`. A `url` must be `http` or `https` (`bad_request` otherwise). One
+  whose host `keep` matches loads in the window, which comes forward; any
+  other opens in the default browser (`"opened_in": "browser"`). Before a
+  config has loaded, `open` with a `url` is `unavailable`.
 - `reload` is `"ok": true` with `"loaded": false` and the error when the
   export fails: the request worked, the config did not. What a running app
   cannot change in place (name, icon, URL schemes) needs `berth sites build`.
-- `signin.fill` carries secrets. They travel only over this socket; the app
-  never logs them or writes them to a file, and forgets them once filled or
-  abandoned. For a `google` step `username` is the email; an `email_from`
-  step sends no `password` or `code`. When a step's page never appears, the
-  app says which step it stopped at and the user finishes by hand.
+- `signin.fill` is not implemented yet: the app replies `unavailable`,
+  "signin.fill is not implemented yet". When it is, it carries secrets. They
+  travel only over this socket; the app never logs them or writes them to a
+  file, and forgets them once filled or abandoned. For a `google` step
+  `username` is the email; an `email_from` step sends no `password` or
+  `code`. When a step's page never appears, the app says which step it
+  stopped at and the user finishes by hand.
+- An app given a URL at launch (`open -a <app> URL`) treats it as `open`
+  does.
 
 ## CLI exit codes
 
