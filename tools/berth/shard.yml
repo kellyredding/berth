@@ -1,0 +1,16 @@
+name: berth
+version: 0.1.0
+description: |
+  Command-line client for Berth: reads and writes the sites config that turns
+  web pages into standalone Mac apps, and builds and drives those apps.
+
+authors:
+  - Kelly Redding
+
+targets:
+  berth:
+    main: src/berth.cr
+
+crystal: ">= 1.18.0"
+
+license: MIT
