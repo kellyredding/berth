@@ -4,9 +4,6 @@ describe "commands that are not built yet" do
   it "fail with exit 1 saying so, and still show their help" do
     SpecHelper.sandbox do |sandbox|
       {
-        ["status"]                                    => "status is not built yet",
-        ["open", "mail"]                              => "open is not built yet",
-        ["open", "mail", "https://mail.example.com/"] => "open is not built yet",
         ["signin", "mail", "--account", "work"]       => "signin is not built yet",
         ["update", "--local"]                         => "update is not built yet",
         ["update", "--version", "0.1.0", "--preview"] => "update is not built yet",

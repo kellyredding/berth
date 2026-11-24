@@ -15,11 +15,11 @@ module Berth
         sites remove SITE
         config path|show|validate|export --json [--site SITE]|init [--starter] [--force]
 
-      Site apps (not built yet):
-        status                          Every site: built, running, version
-        sites build [SITE…|--all]       Stamp, sign and install site apps
+      Site apps:
+        status                          Every site: built, running, title and badge
         open SITE [URL]                 Launch or focus a site app; load URL
-        signin SITE [--account NAME]    Fill a sign-in from 1Password
+        sites build [SITE…|--all]       Stamp, sign and install site apps (not built yet)
+        signin SITE [--account NAME]    Fill a sign-in from 1Password (not built yet)
 
       Health:
         doctor                          Check the config (install and app checks not built yet)

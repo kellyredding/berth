@@ -27,14 +27,26 @@ module Berth
               json.field "message", message
               json.field "path", outcome.path.to_s
               json.field "written", outcome.written.to_s
+              json.field("reload") { reloads_json(json, outcome.reloads) }
               extra.call(json)
             end
           end
         else
           STDOUT.puts message
           STDOUT.puts "  wrote #{outcome.written}" if outcome.written != outcome.path.expand
+          print_reloads(outcome.reloads)
         end
         ExitCode::OK
+      end
+
+      # Each site's reload, keyed by site; an app that is not running says
+      # nothing in text, since it loads the config when it starts.
+      def reloads_json(json : JSON::Builder, reloads : Array(SocketClient::ReloadOutcome)) : Nil
+        json.object { reloads.each { |reload| json.field reload.site, reload } }
+      end
+
+      def print_reloads(reloads : Array(SocketClient::ReloadOutcome)) : Nil
+        reloads.each { |reload| reload.summary.try { |line| STDOUT.puts "  #{line}" } }
       end
 
       def report_mutation(args : Args, outcome : Config::Mutation::Outcome, message : String) : Int32

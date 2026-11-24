@@ -11,6 +11,11 @@ module Berth
       end.join("\n")
     end
 
+    # Text no longer than `width`, ending in … when it was cut.
+    def cut(text : String, width : Int32) : String
+      text.size <= width ? text : "#{text[0, width - 1].rstrip}…"
+    end
+
     def on_off(value : Bool) : String
       value ? "on" : "off"
     end

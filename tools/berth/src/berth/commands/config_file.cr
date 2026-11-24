@@ -126,14 +126,28 @@ module Berth
           raise Error.new("#{path} already exists; pass --force to replace it")
         end
         text = args.switch?("--starter") ? STARTER_CONFIG : MINIMAL
+        before = begin
+          Config::Store.model.sites.map(&.id)
+        rescue Error
+          [] of String
+        end
         written = Config::Writer.write(path, text)
         kind = args.switch?("--starter") ? "the starter config" : "a config with no sites"
+        reloads = SocketClient.reload_all((before + Config::Store.model.sites.map(&.id)).uniq)
 
         if args.json?
-          Support.print_json({"ok" => true, "path" => path.to_s, "written" => written.to_s})
+          Support.print_json do |json|
+            json.object do
+              json.field "ok", true
+              json.field "path", path.to_s
+              json.field "written", written.to_s
+              json.field("reload") { Support.reloads_json(json, reloads) }
+            end
+          end
         else
           STDOUT.puts "wrote #{kind} to #{path}"
           STDOUT.puts "  wrote #{written}" if written != path.expand
+          Support.print_reloads(reloads)
         end
         ExitCode::OK
       end

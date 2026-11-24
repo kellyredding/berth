@@ -11,10 +11,6 @@ down here. Changing any section means changing both sides in the same commit.
 | Config export | `tools/berth/src/berth/config/export.cr` | `BerthApp/BerthApp/Models/SiteConfig.swift` |
 | Socket envelope and events | `tools/berth/src/berth/socket_client.cr` | `BerthApp/BerthApp/Models/Envelope.swift` |
 
-The CLI's socket client does not exist yet; until it does, the CLI commands
-that use the socket events (`status`, `open`, `signin`) exit with a "not
-built yet" error.
-
 `fixtures/config.json` and `fixtures/export.json` pin the export shape for
 both sides: the CLI specs assert that exporting the config yields the JSON
 (compared as values, ignoring `path`, with the fixtures directory written as
@@ -58,6 +54,7 @@ run against temporary directories.
 | Template app | `<root>/template/Berth.app` | — |
 | Install record | `<root>/installed-manifest.json` | — |
 | Site apps | `~/Applications/<name>.app` | `BERTH_APPLICATIONS_DIR` (the directory) |
+| The program `berth open` launches an app with | `/usr/bin/open` | `BERTH_OPEN` (specs) |
 The template is never registered with Launch Services or launched. Each site
 app creates the runtime directories it needs; the CLI never assumes they
 exist.
@@ -293,6 +290,20 @@ value.
   stopped at and the user finishes by hand.
 - An app given a URL at launch (`open -a <app> URL`) treats it as `open`
   does.
+
+### What the CLI does with them
+
+- `berth status` asks each site's app for `status` (waiting 2 s each) and
+  reports it as running, not running (no connection), or not replying.
+- `berth open SITE [URL]` sends `open` to a running app. With no connection
+  it launches `~/Applications/<name>.app` with `open -a`, passing `URL`, and
+  without that app it exits 5 saying to run `berth sites build`. A
+  connection that never replies exits 3 without launching anything, since
+  the app may have acted on the request.
+- Every config write (`sites add|set|remove`, `config init`) then sends
+  `reload` to the app of every site in the config before and after the
+  write. An app that is not running is skipped silently; the write never
+  fails because of a reload.
 
 ## CLI exit codes
 

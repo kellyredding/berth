@@ -51,6 +51,11 @@ module Berth
       applications_dir / "#{name}.app"
     end
 
+    # The program that launches a site app; specs put a stand-in here.
+    def open_command : Path
+      env_path("BERTH_OPEN") || Path.new("/usr/bin/open")
+    end
+
     private def env_path(name : String) : Path?
       value = ENV[name]?
       value && !value.empty? ? Path.new(value) : nil

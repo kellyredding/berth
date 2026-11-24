@@ -83,14 +83,85 @@ module SpecHelper
   end
 
   def run(sandbox : Sandbox, args : Array(String),
-          extra_env : Hash(String, String?) = {} of String => String?) : Result
+          extra_env : Hash(String, String?) = {} of String => String?,
+          chdir : String? = nil) : Result
     unless File::Info.executable?(BINARY)
       raise "berth is not built at #{BINARY}; run `make dev` first"
     end
     stdout = IO::Memory.new
     stderr = IO::Memory.new
-    status = Process.run(BINARY, args, env: sandbox.env.merge(extra_env), output: stdout, error: stderr)
+    status = Process.run(BINARY, args, env: sandbox.env.merge(extra_env), output: stdout, error: stderr, chdir: chdir)
     Result.new(stdout.to_s, stderr.to_s, status.exit_code? || 128 + (status.exit_signal?.try(&.value) || 0))
+  end
+
+  # A stand-in for one site's app: answers each request with the reply line
+  # given for its event (closing without a reply for any other event), and
+  # records the requests. Sockets are bound under a runtime directory relative
+  # to the sandbox, which the CLI is run from, because temporary directories
+  # here can exceed the 104-byte socket path limit.
+  class FakeApp
+    RUNTIME = "runtime"
+
+    getter requests = [] of JSON::Any
+    @server : UNIXServer
+
+    def initialize(@dir : Path, @site : String, @replies : Hash(String, String))
+      Dir.mkdir_p((@dir / RUNTIME).to_s)
+      @server = Dir.cd(@dir.to_s) { UNIXServer.new(socket) }
+      spawn { serve }
+    end
+
+    def socket : String
+      "#{RUNTIME}/#{@site}.sock"
+    end
+
+    def request : JSON::Any
+      requests.size.should eq(1)
+      requests.first
+    end
+
+    def close : Nil
+      @server.close rescue nil
+      File.delete?((@dir / socket).to_s)
+    end
+
+    private def serve : Nil
+      while client = (@server.accept? rescue nil)
+        begin
+          line = client.gets
+          next unless line
+          request = JSON.parse(line)
+          @requests << request
+          if reply = @replies[request["event"].as_s]?
+            client << reply << '\n'
+          end
+        rescue IO::Error
+        ensure
+          client.close rescue nil
+        end
+      end
+    end
+  end
+
+  def with_app(sandbox : Sandbox, site : String, replies : Hash(String, String), &)
+    app = FakeApp.new(sandbox.root, site, replies)
+    begin
+      yield app
+    ensure
+      app.close
+    end
+  end
+
+  # Runs the CLI from the sandbox with the fake apps' runtime directory.
+  def run_live(sandbox : Sandbox, args : Array(String), extra_env : Hash(String, String?) = {} of String => String?) : Result
+    run(sandbox, args, {"BERTH_RUNTIME_DIR" => FakeApp::RUNTIME}.merge(extra_env), chdir: sandbox.root.to_s)
+  end
+
+  def write_executable(path : Path, body : String) : Path
+    Dir.mkdir_p(path.parent.to_s)
+    File.write(path.to_s, body)
+    File.chmod(path.to_s, 0o755)
+    path
   end
 
   # An export with `path` dropped and the fixtures directory written as

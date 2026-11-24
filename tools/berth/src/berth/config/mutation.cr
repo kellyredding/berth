@@ -1,12 +1,14 @@
 module Berth
   module Config
     # One change to the config: load (the starter when there is no file),
-    # apply, validate the whole result, then write symlink-safely. An invalid
-    # result is refused and nothing is written.
+    # apply, validate the whole result, write symlink-safely, then ask each
+    # site's running app to reload. An invalid result is refused and nothing
+    # is written.
     class Mutation
-      record Outcome, path : Path, written : Path, model : Model
+      record Outcome, path : Path, written : Path, model : Model, reloads : Array(SocketClient::ReloadOutcome)
 
       getter root : Hash(String, JSON::Any)
+      @sites_before : Array(String)
 
       def self.apply(&block : Mutation -> Nil) : Outcome
         mutation = new(Store.load)
@@ -21,6 +23,8 @@ module Berth
         else
           @root = tree.as_h? || raise InvalidConfig.new("the config is invalid", ["the config: must be an object"])
         end
+        # A removed site's app is told too, so it reports that its site is gone.
+        @sites_before = (@root["sites"]?.try(&.as_h?).try(&.keys) || [] of String).select(&.matches?(SITE_PATTERN))
       end
 
       # The `sites` object, created in canonical position if absent.
@@ -48,7 +52,9 @@ module Berth
         end
 
         written = Writer.write(@loaded.path, Emitter.emit(@root))
-        Outcome.new(@loaded.path, written, result.model!.copy_with(source: Source::File))
+        model = result.model!
+        Outcome.new(@loaded.path, written, model.copy_with(source: Source::File),
+          SocketClient.reload_all((model.sites.map(&.id) + @sites_before).uniq))
       end
 
       # Sets `key` in place when present, else inserts it before the first key

@@ -32,8 +32,14 @@ key back to its default. A sign-in login is set with `--login NAME --steps
 JSON` and removed with `--remove-login NAME`. `config export --json [--site
 SITE]` is what a site app loads.
 
-**Site apps** (not built yet): `status`, `sites build`, `open`, `signin`.
-Each parses its options and exits 1 saying it is not built yet.
+**Site apps:** `status` reports, for every site, whether its app is built and
+running, and a running app's page title and Dock badge. `open SITE [URL]`
+brings a running app forward and loads `URL` in it (or in the default browser
+when the site does not keep its host), and otherwise launches the built app
+with `open -a`. Each running app talks over its own Unix socket
+(`<runtime>/<site>.sock`); after every config write the CLI asks each running
+app to reload, and says so only for the apps that answered. `sites build` and
+`signin` are not built yet: each parses its options and exits 1 saying so.
 
 **Health:** `doctor` checks the config; install, template and site-app checks
 are not built yet. `version`; `update` is not built yet.
@@ -74,6 +80,7 @@ directory.
 | Runtime dir | `<root>/runtime` | `BERTH_RUNTIME_DIR` |
 | CLI binary | `<root>/bin/berth` | `BERTH_BINARY` |
 | Site apps | `~/Applications` | `BERTH_APPLICATIONS_DIR` |
+| The program that launches an app | `/usr/bin/open` | `BERTH_OPEN` |
 
 Specs point all of these at temporary directories and never touch `~/.berth`
 or `~/Applications`.
