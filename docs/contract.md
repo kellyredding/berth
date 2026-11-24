@@ -1,0 +1,292 @@
+# The CLI ↔ app contract
+
+Berth is two programs: the Crystal CLI (`tools/berth/`) and the Swift shell
+app (`BerthApp/`), copied once per configured site into a separate, signed
+site app. They share no code, so everything they must agree on is written
+down here. Changing any section means changing both sides in the same commit.
+
+| Section | Crystal | Swift |
+|---|---|---|
+| Paths | `tools/berth/src/berth/paths.cr` | `BerthApp/BerthApp/Models/Paths.swift` |
+| Config export | `tools/berth/src/berth/config/export.cr` | `BerthApp/BerthApp/Models/SiteConfig.swift` |
+| Socket envelope and events | `tools/berth/src/berth/socket_client.cr` | `BerthApp/BerthApp/Models/Envelope.swift` |
+
+The app and the CLI's socket client do not exist yet; the files above are
+where they go. Until they do, the socket events below are the app's to
+implement, and the CLI commands that use them (`status`, `open`, `signin`)
+exit with a "not built yet" error.
+
+`fixtures/config.json` and `fixtures/export.json` pin the export shape for
+both sides: the CLI specs assert that exporting the config yields the JSON
+(compared as values, ignoring `path`, with the fixtures directory written as
+`fixtures/` in `icon`), and the app's smoke check decodes the JSON. A drift
+on either side fails a check. Neither side edits the fixtures to make its own
+check pass; a mismatch means the contract changes first.
+
+## Division of labour
+
+- **The app is the actor.** Each site app shows its site in a WebKit view,
+  keeps it signed in, decides which links stay in the app, badges its Dock
+  tile, forwards notifications, handles the URL schemes it claims, and fills
+  sign-in forms it is sent. It never reads or writes the config file itself.
+- **The CLI is the client, and the only reader and writer of the config.** A
+  site app gets its site's resolved config by running
+  `berth config export --site SITE --json`. The CLI builds, signs and
+  installs site apps, reads 1Password, and reaches a running site app over
+  that app's socket.
+- **One template, many apps.** A release ships one signed template,
+  `Berth.app`. A site app is a copy of it whose `Info.plist` names its site
+  (`BerthSite`), with the bundle identifier `com.kellyredding.berth.<site>`
+  and the site's `name`, icon and URL schemes.
+
+## Paths
+
+Every path can be overridden by an environment variable, so specs and checks
+run against temporary directories.
+
+| Path | Default | Override |
+|---|---|---|
+| Root | `~/.berth` | `BERTH_ROOT` |
+| Config | `<root>/config.json` | `BERTH_CONFIG` |
+| Runtime dir | `<root>/runtime` | `BERTH_RUNTIME_DIR` |
+| A site app's socket | `<runtime>/<site>.sock` | — |
+| A site app's log | `<runtime>/logs/<site>.log` | — |
+| CLI binary (for the apps) | `<root>/bin/berth` | `BERTH_BINARY` |
+| Template app | `<root>/template/Berth.app` | — |
+| Install record | `<root>/installed-manifest.json` | — |
+| Site apps | `~/Applications/<name>.app` | `BERTH_APPLICATIONS_DIR` (the directory) |
+
+The template is never registered with Launch Services or launched. Each site
+app creates the runtime directories it needs; the CLI never assumes they
+exist.
+
+The config path may be a symlink (into a private dotfiles repository, say).
+Every write resolves the link and replaces the real file, never the link: a
+temp file written beside the real file, then renamed over it. Renaming over
+the link path itself would replace the link with a regular file.
+
+## Config file (JSON, read and written only by the CLI)
+
+```json
+{
+  "version": 1,
+  "sites": {
+    "mail": {
+      "name": "Mail",
+      "url": "https://mail.example.com/",
+      "keep": ["mail.example.com", "accounts.example.com", "*.sso.example.com"],
+      "icon": "icons/mail.png",
+      "badge": {
+        "title": "\\((\\d+)\\)"
+      },
+      "handles": ["mailto"],
+      "mailto": "https://mail.example.com/compose?to=%s",
+      "notifications": true,
+      "launch_at_login": true,
+      "signin": {
+        "personal": [
+          {"flow": "google", "item": "op://Personal/Example Mail"}
+        ],
+        "work": [
+          {"flow": "google", "email_from": "op://Work/Example SSO"},
+          {"flow": "okta", "item": "op://Work/Example SSO"}
+        ]
+      }
+    }
+  }
+}
+```
+
+Each key of `sites` is a **site**: the name the CLI and the app use for it
+(`berth open mail`), its socket's name, and the last part of its app's
+bundle identifier (`com.kellyredding.berth.mail`).
+
+| Key | Required | Default | Value |
+|---|---|---|---|
+| `name` | yes | — | The display name, and the app's file name: `~/Applications/Mail.app` |
+| `url` | yes | — | The page the app opens: an `https` URL |
+| `keep` | no | the `url`'s host | Hosts whose pages stay in the app |
+| `icon` | no | none (the template's icon) | A PNG file |
+| `badge.title` | no | no badge | A regular expression whose one capture group, matched against the page title, is the Dock badge |
+| `handles` | no | `[]` | URL schemes the app handles: `mailto` |
+| `mailto` | when `handles` has `mailto` | none | The URL a `mailto:` link opens, with `%s` where the link goes |
+| `notifications` | no | `false` | Whether the page's web notifications become macOS notifications |
+| `launch_at_login` | no | `false` | Whether the app opens at login |
+| `signin` | no | `{}` | Named logins, each the ordered steps of one sign-in |
+
+- **`keep`** holds exact hosts (`mail.example.com`) and suffix patterns
+  (`*.example.com`). A suffix pattern matches any host ending in
+  `.example.com`, not `example.com` itself. Matching ignores case and the
+  port. A navigation to a kept host stays in the app, and an in-app popup on
+  one opens in a second window; anything else, whether a link,
+  `target=_blank`, `window.open` or a ⌘-click, opens in the default browser.
+- **`icon`** is a path relative to the directory the config file really
+  lives in (after following its symlink), or an absolute path. `~` is not
+  expanded.
+- **`badge.title`** is checked with the CLI's regular expressions (PCRE2);
+  the app runs it with `NSRegularExpression` (ICU). Write it in the syntax
+  the two share: groups, classes, `\d`, `\s`, quantifiers, anchors. A match
+  whose group is empty, or no match, clears the badge.
+- **`signin`**: each login is a list of steps, run in order. A step is
+  `{"flow": "google" | "okta", "item": "op://…"}`, which signs in with that
+  1Password item's username, password and one-time code, or
+  `{"flow": "google", "email_from": "op://…"}`, which gives the Google page
+  only the email (the item's username) so that Google hands off to the next
+  step's single sign-on. `berth signin SITE` uses the only login, and
+  `--account NAME` picks one when there are several.
+
+The file is strict JSON (RFC 8259, with no extensions). A file that does not
+parse, or repeats a key within one object, is invalid, and the error gives
+the line and column. The CLI writes the file with two-space indentation,
+`version` before `sites`, a site's keys in the order of the table above when
+the CLI adds them and in their existing order otherwise, an array of plain
+values on one line, an array holding objects with one element per line and
+each flat object (a sign-in step) on its line, and a trailing newline.
+
+When the config file does not exist, the CLI uses the starter config
+embedded in it (`config/starter.json` in the repository); `berth config init
+--starter` writes that out, and `berth config init` writes one with no sites.
+
+### Validation
+
+The CLI validates the whole config before any write and refuses an invalid
+result, writing nothing. Every problem is reported, not just the first.
+
+- The top level is an object. Unknown keys are errors at every level, so a
+  typo is reported rather than ignored. An optional key set to `null` reads
+  as absent.
+- `version` is `1`; a missing `version` reads as `1`.
+- `sites` is an object. A site matches `[a-z0-9][a-z0-9-]*`, at most 32
+  characters (its socket path must fit the 104-byte limit).
+- `name`: a string of at most 64 characters, without spaces at its start or
+  end, a `/`, a `:`, a control character, or a leading `.`. No two sites
+  share a name, ignoring case, since they would share an app.
+- `url`: an `https` URL with a host and no spaces.
+- `keep`: a non-empty list of distinct host patterns. A host is lowercase
+  labels of letters, digits and hyphens joined by dots, each label starting
+  and ending with a letter or digit; a suffix pattern is `*.` followed by a
+  host of at least two labels (`*.com` is refused). One pattern must match
+  the `url`'s host.
+- `icon`: a string naming a file that exists and starts with the PNG
+  signature.
+- `badge`: an object whose only key, `title`, is a string that compiles as a
+  regular expression with exactly one capture group.
+- `handles`: a list of distinct schemes, each `mailto`.
+- `mailto`: an `https` URL (with `%s` standing for a value) containing `%s`
+  exactly once. Required when `handles` has `mailto`; set without it, it is a
+  **warning** (`sites.mail.mailto: unused; add mailto to handles or remove
+  it`).
+- `notifications`, `launch_at_login`: `true` or `false`.
+- `signin`: an object whose keys match `[a-z0-9][a-z0-9-]*`. Each login is a
+  non-empty list of steps. A step is an object with `flow` (`google` or
+  `okta`) and exactly one of `item` and `email_from`; `email_from` goes only
+  with `google`, and a step must follow it. Each reference is
+  `op://VAULT/ITEM`, optionally followed by `/FIELD` or `/SECTION/FIELD`,
+  with no empty part. The CLI checks the shape only; it never runs `op` to
+  validate.
+
+## Config export (`berth config export --json [--site SITE]`)
+
+The normalized config: defaults filled in, `icon` an absolute path, `badge`,
+`mailto` and each step's `item` and `email_from` present as `null` when
+absent.
+
+```json
+{
+  "version": 1,
+  "source": "file",
+  "path": "/Users/me/.berth/config.json",
+  "sites": {
+    "mail": {
+      "site": "mail",
+      "bundle_id": "com.kellyredding.berth.mail",
+      "name": "Mail",
+      "url": "https://mail.example.com/",
+      "keep": ["mail.example.com", "accounts.example.com", "*.sso.example.com"],
+      "icon": "/Users/me/dotfiles/berth/icons/mail.png",
+      "badge": { "title": "\\((\\d+)\\)" },
+      "handles": ["mailto"],
+      "mailto": "https://mail.example.com/compose?to=%s",
+      "notifications": true,
+      "launch_at_login": true,
+      "signin": {
+        "personal": [
+          { "flow": "google", "item": "op://Personal/Example Mail", "email_from": null }
+        ],
+        "work": [
+          { "flow": "google", "item": null, "email_from": "op://Work/Example SSO" },
+          { "flow": "okta", "item": "op://Work/Example SSO", "email_from": null }
+        ]
+      }
+    }
+  },
+  "warnings": []
+}
+```
+
+- `source` is `"file"` or `"starter"` (no config file exists).
+- `path` is the configured path, not the symlink's target.
+- `sites` is in config order. With `--site SITE`, it holds only that site.
+- `keep` is the configured list, or `[host of url]` when there is none.
+- `icon` is resolved against the config file's real directory.
+- An invalid config exits 1 with the errors on stderr, whichever site is
+  asked for: a site app keeps its last good config and shows the error. An
+  unknown `--site` exits 5.
+
+## Socket
+
+Each running site app listens on its own Unix socket,
+`<runtime>/<site>.sock`, created with mode `0600`. The CLI connects, writes
+one request line, reads one reply line, and the app closes the connection.
+This is Assist Ant's envelope, as Trellis uses it.
+
+Request (one line of JSON, then `\n`):
+
+```json
+{"v":1,"event":"open","ts":1716825600,"detail_data":{"url":"https://mail.example.com/#inbox"}}
+```
+
+Reply (one line of JSON, then `\n`):
+
+```json
+{"ok":true,"data":{ }}
+{"ok":false,"error":"no sign-in form is showing","code":"unavailable"}
+```
+
+Error codes: `bad_request`, `not_permitted`, `not_found`, `unavailable` (the
+app cannot do it yet, e.g. no config loaded), `internal`. The CLI adds
+`not_running` to its own `--json` error output when there is no connection
+or no reply; the app never sends it. The CLI waits 5 s for a reply.
+
+### Events
+
+The app implements these; the details of each reply are settled when it is
+built, and recorded here then.
+
+| Event | `detail_data` | `data` on success |
+|---|---|---|
+| `status` | — | `{"version", "pid", "site", "url", "title", "config": {"loaded": bool, "state": "loading"\|"loaded"\|"failed", "error": string\|null}}` |
+| `open` | `{"url"?}` | `{"url"}`: brings the window forward, and loads `url` when given |
+| `reload` | — | `{"loaded": bool, "error": string\|null}`: re-runs the export and applies the site's config |
+| `signin.fill` | `{"login", "steps": [{"flow", "username", "password"?, "code"?}]}` | `{"accepted": true}`: fills each step as its page appears |
+
+- `open` refuses a `url` whose host `keep` does not match (`bad_request`).
+- `reload` is `"ok": true` with `"loaded": false` and the error when the
+  export fails: the request worked, the config did not. What a running app
+  cannot change in place (name, icon, URL schemes) needs `berth sites build`.
+- `signin.fill` carries secrets. They travel only over this socket; the app
+  never logs them or writes them to a file, and forgets them once filled or
+  abandoned. For a `google` step `username` is the email; an `email_from`
+  step sends no `password` or `code`. When a step's page never appears, the
+  app says which step it stopped at and the user finishes by hand.
+
+## CLI exit codes
+
+| Code | Meaning |
+|---|---|
+| 0 | Success |
+| 1 | Failed, including an invalid config or a refused change (`bad_request`, `unavailable`, `internal`) |
+| 2 | Usage error |
+| 3 | The site's app is not running (no connection, or no reply) |
+| 4 | Not permitted (`not_permitted`, or 1Password declined) |
+| 5 | No such site or login, or the site's app is not built (`not_found`) |

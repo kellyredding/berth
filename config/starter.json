@@ -1,0 +1,21 @@
+{
+  "version": 1,
+  "sites": {
+    "docs": {
+      "name": "Docs",
+      "url": "https://docs.example.com/",
+      "keep": ["docs.example.com", "accounts.example.com"]
+    },
+    "mail": {
+      "name": "Mail",
+      "url": "https://mail.example.com/",
+      "keep": ["mail.example.com", "accounts.example.com"],
+      "badge": {
+        "title": "\\((\\d+)\\)"
+      },
+      "handles": ["mailto"],
+      "mailto": "https://mail.example.com/compose?to=%s",
+      "notifications": true
+    }
+  }
+}

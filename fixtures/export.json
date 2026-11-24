@@ -1,0 +1,44 @@
+{
+  "version": 1,
+  "source": "file",
+  "path": "fixtures/config.json",
+  "sites": {
+    "mail": {
+      "site": "mail",
+      "bundle_id": "com.kellyredding.berth.mail",
+      "name": "Mail",
+      "url": "https://mail.example.com/",
+      "keep": ["mail.example.com", "accounts.example.com", "*.sso.example.com"],
+      "icon": "fixtures/icons/mail.png",
+      "badge": { "title": "\\((\\d+)\\)" },
+      "handles": ["mailto"],
+      "mailto": "https://mail.example.com/compose?to=%s",
+      "notifications": true,
+      "launch_at_login": true,
+      "signin": {
+        "personal": [
+          { "flow": "google", "item": "op://Personal/Example Mail", "email_from": null }
+        ],
+        "work": [
+          { "flow": "google", "item": null, "email_from": "op://Work/Example SSO" },
+          { "flow": "okta", "item": "op://Work/Example SSO", "email_from": null }
+        ]
+      }
+    },
+    "docs": {
+      "site": "docs",
+      "bundle_id": "com.kellyredding.berth.docs",
+      "name": "Docs",
+      "url": "https://docs.example.com/",
+      "keep": ["docs.example.com"],
+      "icon": null,
+      "badge": null,
+      "handles": [],
+      "mailto": null,
+      "notifications": false,
+      "launch_at_login": false,
+      "signin": {}
+    }
+  },
+  "warnings": []
+}

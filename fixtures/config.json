@@ -1,0 +1,31 @@
+{
+  "version": 1,
+  "sites": {
+    "mail": {
+      "name": "Mail",
+      "url": "https://mail.example.com/",
+      "keep": ["mail.example.com", "accounts.example.com", "*.sso.example.com"],
+      "icon": "icons/mail.png",
+      "badge": {
+        "title": "\\((\\d+)\\)"
+      },
+      "handles": ["mailto"],
+      "mailto": "https://mail.example.com/compose?to=%s",
+      "notifications": true,
+      "launch_at_login": true,
+      "signin": {
+        "personal": [
+          {"flow": "google", "item": "op://Personal/Example Mail"}
+        ],
+        "work": [
+          {"flow": "google", "email_from": "op://Work/Example SSO"},
+          {"flow": "okta", "item": "op://Work/Example SSO"}
+        ]
+      }
+    },
+    "docs": {
+      "name": "Docs",
+      "url": "https://docs.example.com/"
+    }
+  }
+}

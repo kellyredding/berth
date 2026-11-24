@@ -1,0 +1,19 @@
+# Crystal
+tools/*/build/
+tools/*/lib/
+tools/*/.crystal/
+tools/*/bin/
+tools/*/shard.lock
+
+# Swift / Xcode
+BerthApp/build/
+BerthApp/*.xcodeproj/
+BerthApp/*.xcworkspace/
+BerthApp/DerivedData/
+*.swp
+
+# Packaging
+dist/
+
+# macOS
+.DS_Store
