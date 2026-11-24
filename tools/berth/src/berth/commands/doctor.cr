@@ -5,18 +5,20 @@ module Berth
       extend self
 
       HELP = <<-TEXT
-        berth doctor — check the CLI and the config
+        berth doctor — check the CLI, the config and each site's app
 
         Reports the CLI version; the config path, where its symlink resolves,
         whether it is a file or the built-in starter, and whether it is valid
-        JSON and a valid config, with its warnings. Exits 1 when a check fails.
+        JSON and a valid config, with its warnings. Then, for each site, its
+        app at ~/Applications/NAME.app: whether it is built and names this
+        site, whether it is signed by Berth Release Signing, whether Launch
+        Services knows it (and any other copy registered under its bundle
+        identifier), and whether it is running. Exits 1 when a check fails.
 
-        The install record, the template app and each site app (its build,
-        signer and Launch Services registration) are not checked yet: those
-        checks arrive with the apps.
+        The install record and the template app are not checked yet.
         TEXT
 
-      PENDING = "install, template and site-app checks are not built yet"
+      PENDING = "install record and template checks are not built yet"
 
       enum Level
         Ok
@@ -50,8 +52,10 @@ module Berth
         args.at_most(0)
 
         checks = [Check.new(Level::Ok, "cli", "berth #{VERSION}")]
-        config = config_checks(checks)
-        checks << Check.new(Level::Info, "apps", PENDING)
+        model = nil
+        config = config_checks(checks) { |valid| model = valid }
+        checks << Check.new(Level::Info, "install", PENDING)
+        apps = model.try { |valid| SiteAppChecks.run(valid, checks) } || [] of SiteAppChecks::Report
 
         if args.json?
           Support.print_json do |json|
@@ -59,6 +63,7 @@ module Berth
               json.field "ok", checks.none?(&.level.fail?)
               json.field("cli") { json.object { json.field "version", VERSION } }
               json.field("config") { config.call(json) }
+              json.field "sites", apps
               json.field "checks", checks
             end
           end
@@ -72,7 +77,7 @@ module Berth
         checks.any?(&.level.fail?) ? ExitCode::FAILED : ExitCode::OK
       end
 
-      private def config_checks(checks : Array(Check)) : Proc(JSON::Builder, Nil)
+      private def config_checks(checks : Array(Check), & : Config::Model ->) : Proc(JSON::Builder, Nil)
         path = Paths.config_file
         resolved = nil
         source = nil
@@ -92,6 +97,7 @@ module Berth
           errors = result.errors
           warnings = result.warnings
           if model = result.model
+            yield model
             sites = model.sites.map(&.id)
             checks << Check.new(Level::Ok, "config",
               "valid: #{sites.size} site#{sites.size == 1 ? "" : "s"}#{sites.empty? ? "" : " (#{sites.join(", ")})"}")

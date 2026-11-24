@@ -63,8 +63,11 @@ The signing script is `bin/lib/sign-app.sh`. A CLI built in a checkout runs
 the checkout's copy; an installed one runs `~/.berth/libexec/sign-app.sh`;
 `BERTH_SIGN_SCRIPT` overrides both.
 
-**Health:** `doctor` checks the config; install, template and site-app checks
-are not built yet. `version`; `update` is not built yet.
+**Health:** `doctor` checks the config and, for each site, its app: built and
+stamped for the site, signed by Berth Release Signing (ad hoc warns), known
+to Launch Services (another registered copy, or a development build, warns),
+and running. The install record and template checks are not built yet.
+`version`; `update` is not built yet.
 
 Run `berth <command> --help` for each command's options.
 

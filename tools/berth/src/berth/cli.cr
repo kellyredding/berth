@@ -23,7 +23,7 @@ module Berth
         signin SITE [--account NAME]    Fill a sign-in from 1Password (not built yet)
 
       Health:
-        doctor                          Check the config (install and app checks not built yet)
+        doctor                          Check the config and each site's app
         version                         Print the version
         update [--version X.Y.Z | --local [PATH]] [--preview] [--force]
 
