@@ -51,6 +51,17 @@ module Berth
     end
   end
 
+  # 1Password declined, or a site app refused with `not_permitted`.
+  class NotPermitted < Error
+    def initialize(message : String)
+      super(message, ExitCode::NOT_PERMITTED)
+    end
+
+    def code : String
+      "not_permitted"
+    end
+  end
+
   # The config file cannot be parsed, or a change would leave it invalid.
   class InvalidConfig < Error
     getter errors : Array(String)

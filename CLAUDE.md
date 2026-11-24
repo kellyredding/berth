@@ -72,14 +72,19 @@ macOS ties a site app's notification permission and login item to its
 signature. **Never sign ad hoc** anything that gets installed. Releases and
 every site app are signed with the self-signed "Berth Release Signing"
 identity from 1Password, which Kelly approves, so each app keeps one
-signature across rebuilds and updates.
+signature across rebuilds and updates. `berth sites build --sign adhoc` is
+for scratch directories only (`BERTH_APPLICATIONS_DIR`). Agents never run
+`bin/signing-identity create`; Kelly does.
 
 ## Do not
 
 - Launch, quit or sign in to a site app unless asked. Reading (`berth sites
   list`, `berth config export --json`, `berth status`) is always fine.
-- Touch `~/.berth` or `~/Applications` from specs or checks: every path has
-  an environment override (`BERTH_ROOT`, `BERTH_CONFIG`, `BERTH_RUNTIME_DIR`,
-  `BERTH_BINARY`, `BERTH_APPLICATIONS_DIR`).
+- Touch `~/.berth`, `~/Applications` or the Launch Services database from
+  specs or checks: every path has an environment override (`BERTH_ROOT`,
+  `BERTH_CONFIG`, `BERTH_RUNTIME_DIR`, `BERTH_BINARY`,
+  `BERTH_APPLICATIONS_DIR`), and so does every tool a build runs
+  (`BERTH_SIGN_SCRIPT`, `BERTH_CODESIGN`, `BERTH_SIPS`, `BERTH_ICONUTIL`,
+  `BERTH_LSREGISTER`).
 - Run `op` from specs, or put a secret in a spec, a log, a file or argv.
   Sign-in secrets travel only from `op`'s output to a site app's socket.

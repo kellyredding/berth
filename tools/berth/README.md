@@ -38,8 +38,30 @@ brings a running app forward and loads `URL` in it (or in the default browser
 when the site does not keep its host), and otherwise launches the built app
 with `open -a`. Each running app talks over its own Unix socket
 (`<runtime>/<site>.sock`); after every config write the CLI asks each running
-app to reload, and says so only for the apps that answered. `sites build` and
-`signin` are not built yet: each parses its options and exits 1 saying so.
+app to reload, and says so only for the apps that answered. `signin` is not
+built yet: it parses its options and exits 1 saying so.
+
+**Building site apps:** `sites build [SITE…|--all] [--template PATH] [--sign
+op|adhoc] [--preview]` copies the template (`~/.berth/template/Berth.app`, or
+`--template`) to `~/Applications/NAME.app` for each site, stamps its
+`Info.plist` and icon, signs every copy in one session, then swaps each in by
+rename and registers it with Launch Services. `--sign op`, the default, signs
+with "Berth Release Signing" from 1Password, one approval for the whole
+build; `--sign adhoc` is for development, and warns that macOS may forget an
+ad-hoc app's permissions. `--preview` prints the plan and changes nothing. It
+refuses a missing template, an unknown site (exit 5), and anything at a
+destination that is not that site's Berth app, changing nothing; a link
+there is replaced, never its target. It never launches, quits or restarts an
+app: a running one keeps its old build until restarted. In a checkout:
+
+```bash
+make -C BerthApp release
+berth sites build docs --template BerthApp/build/Build/Products/Release/Berth.app
+```
+
+The signing script is `bin/lib/sign-app.sh`. A CLI built in a checkout runs
+the checkout's copy; an installed one runs `~/.berth/libexec/sign-app.sh`;
+`BERTH_SIGN_SCRIPT` overrides both.
 
 **Health:** `doctor` checks the config; install, template and site-app checks
 are not built yet. `version`; `update` is not built yet.
@@ -81,6 +103,8 @@ directory.
 | CLI binary | `<root>/bin/berth` | `BERTH_BINARY` |
 | Site apps | `~/Applications` | `BERTH_APPLICATIONS_DIR` |
 | The program that launches an app | `/usr/bin/open` | `BERTH_OPEN` |
+| Signing script | the checkout's `bin/lib/sign-app.sh`, else `<root>/libexec/sign-app.sh` | `BERTH_SIGN_SCRIPT` |
+| `codesign`, `sips`, `iconutil`, `lsregister` | the system's | `BERTH_CODESIGN`, `BERTH_SIPS`, `BERTH_ICONUTIL`, `BERTH_LSREGISTER` |
 
-Specs point all of these at temporary directories and never touch `~/.berth`
-or `~/Applications`.
+Specs point all of these at temporary directories and stand-ins, and never
+touch `~/.berth`, `~/Applications` or the Launch Services database.

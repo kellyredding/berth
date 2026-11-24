@@ -18,7 +18,8 @@ module Berth
       Site apps:
         status                          Every site: built, running, title and badge
         open SITE [URL]                 Launch or focus a site app; load URL
-        sites build [SITE…|--all]       Stamp, sign and install site apps (not built yet)
+        sites build [SITE…|--all] [--template PATH] [--sign op|adhoc] [--preview]
+                                        Stamp, sign and install site apps
         signin SITE [--account NAME]    Fill a sign-in from 1Password (not built yet)
 
       Health:

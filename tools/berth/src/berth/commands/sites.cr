@@ -13,7 +13,7 @@ module Berth
           set SITE [options] [--no-keep] [--no-icon] [--no-badge] [--no-handles]
                    [--no-mailto] [--no-signin]
           remove SITE              Removes it from the config only
-          build [SITE…|--all]      Not built yet
+          build [SITE…|--all]      Stamp, sign and install site apps; see `berth sites build --help`
 
         Options:
           --name NAME              Display name and app name (~/Applications/NAME.app)
@@ -39,12 +39,6 @@ module Berth
         them up with `berth sites build`.
         TEXT
 
-      BUILD_HELP = <<-TEXT
-        berth sites build [SITE…|--all] — stamp, sign and install site apps
-
-        Not built yet: it needs the Berth template app, which does not exist yet.
-        TEXT
-
       VALUES = ["--name", "--url", "--keep", "--icon", "--badge-title", "--handles", "--mailto",
                 "--notifications", "--launch-at-login", "--login", "--steps", "--remove-login"]
 
@@ -59,11 +53,7 @@ module Berth
       }
 
       def run(argv : Array(String)) : Int32
-        if argv.first? == "build"
-          args = Args.parse(argv[1..], switches: ["--all"])
-          return Support.not_built(args, BUILD_HELP,
-            "sites build is not built yet: it needs the Berth template app, which does not exist yet")
-        end
+        return Build.run(argv[1..]) if argv.first? == "build"
 
         args = Args.parse(argv, values: VALUES, switches: CLEARS.keys)
         Support.help(args, HELP).try { |code| return code }

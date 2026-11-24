@@ -55,6 +55,11 @@ run against temporary directories.
 | Install record | `<root>/installed-manifest.json` | — |
 | Site apps | `~/Applications/<name>.app` | `BERTH_APPLICATIONS_DIR` (the directory) |
 | The program `berth open` launches an app with | `/usr/bin/open` | `BERTH_OPEN` (specs) |
+| The signing script `berth sites build` runs | `<checkout>/bin/lib/sign-app.sh` for a CLI built in a checkout (`tools/berth/build/berth`), else `<root>/libexec/sign-app.sh` | `BERTH_SIGN_SCRIPT` (the only one tried when set) |
+| `codesign`, `sips`, `iconutil` | `/usr/bin/…` | `BERTH_CODESIGN`, `BERTH_SIPS`, `BERTH_ICONUTIL` (specs) |
+| `lsregister` | Launch Services' own, in `CoreServices.framework` | `BERTH_LSREGISTER` (specs) |
+
+The last three rows are the CLI's alone; the app never builds or signs.
 The template is never registered with Launch Services or launched. Each site
 app creates the runtime directories it needs; the CLI never assumes they
 exist.
@@ -63,6 +68,41 @@ The config path may be a symlink (into a private dotfiles repository, say).
 Every write resolves the link and replaces the real file, never the link: a
 temp file written beside the real file, then renamed over it. Renaming over
 the link path itself would replace the link with a regular file.
+
+## Site apps (`berth sites build`)
+
+The template is a Berth template when its `CFBundleIdentifier` is
+`com.kellyredding.berth` and it has no `BerthSite`; the CLI refuses anything
+else. It copies the template to a hidden staging path beside the site's app
+(`.<name>.app.berth-new`) and stamps the copy's `Info.plist`:
+
+| Key | Value |
+|---|---|
+| `CFBundleIdentifier` | `com.kellyredding.berth.<site>` |
+| `CFBundleName`, `CFBundleDisplayName` | The site's `name`; the app takes its menu name from `CFBundleName` |
+| `BerthSite` | The site; the app shows the site it names |
+| `CFBundleURLTypes` | One entry, `CFBundleURLName` the bundle identifier and `CFBundleURLSchemes` the site's `handles`; removed when `handles` is empty |
+| `CFBundleIconFile` | `SiteIcon`, for `Contents/Resources/SiteIcon.icns` made from the site's `icon` (a full iconset, 16 to 1024 px), with `CFBundleIconName` removed so the template's asset-catalog icon does not win; untouched when the site has no icon |
+
+Every other key is the template's, `CFBundleShortVersionString`,
+`CFBundleVersion` and `BerthBuildCommit` among them.
+
+Then the CLI signs every copy in the build in one run of the signing script
+(`sign-app.sh op|adhoc PATH…`), so the release identity costs one 1Password
+approval; the script exits 4 when 1Password does not provide it. Each copy
+must pass `codesign --verify --strict`, carry its bundle identifier as its
+`Identifier`, and have `Berth Release Signing` as its `Authority` (or be ad
+hoc with `--sign adhoc`). Only then is each moved into place by rename, and
+registered with `lsregister -f`; every `*/Build/Products/*/Berth.app`
+registered is unregistered.
+
+- **What may be replaced:** nothing, a symbolic link (the link is removed,
+  never its target), or this site's own app: a directory whose `BerthSite` is
+  the site and whose `CFBundleIdentifier` starts with
+  `com.kellyredding.berth.`. Anything else at any destination refuses the
+  whole build before anything changes.
+- **A running app** keeps its old build until it is restarted. The CLI never
+  launches, quits or restarts one.
 
 ## Config file (JSON, read and written only by the CLI)
 

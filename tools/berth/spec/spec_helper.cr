@@ -29,11 +29,57 @@ module SpecHelper
     end
   end
 
-  # One example's world: a private BERTH_ROOT and applications directory.
+  # One example's world: a private BERTH_ROOT and applications directory, and
+  # stand-ins for the signing script, codesign, sips, iconutil and lsregister
+  # that record their calls under `fakes/`, so nothing is signed for real and
+  # the real Launch Services database is never read or changed.
   class Sandbox
     getter root : Path
 
     def initialize(@root : Path)
+      Fakes.install(fakes)
+    end
+
+    def fakes : Path
+      @root / "fakes"
+    end
+
+    # Each call to a fake, one line of its arguments per call.
+    def calls(tool : String) : Array(String)
+      path = fakes / "#{tool}.calls"
+      File.exists?(path.to_s) ? File.read(path.to_s).lines : [] of String
+    end
+
+    # What the fake lsregister prints for `-dump`: one record per path.
+    def register(entries : Array(Tuple(String, String))) : Nil
+      body = entries.map_with_index do |(path, identifier), index|
+        "-" * 80 + "\n" \
+                   "bundle id:                  #{File.basename(path, ".app")} (0x#{(100 + index).to_s(16)})\n" \
+                   "path:                       #{path} (0x#{(200 + index).to_s(16)})\n" \
+                   "name:                       #{File.basename(path, ".app")}\n" \
+                   "identifier:                 #{identifier}\n"
+      end
+      File.write((fakes / "lsregister.dump").to_s, body.join)
+    end
+
+    def template : Path
+      @root / "template" / "Berth.app"
+    end
+
+    # A stand-in for the template: an Info.plist, an executable and the
+    # asset catalog's icon.
+    def write_template(bundle_id : String = "com.kellyredding.berth", extra : String = "") : Path
+      SpecHelper.write_bundle(template, <<-XML)
+        <key>CFBundleIdentifier</key><string>#{bundle_id}</string>
+        <key>CFBundleName</key><string>Berth</string>
+        <key>CFBundleDisplayName</key><string>Berth</string>
+        <key>CFBundleShortVersionString</key><string>0.1.0</string>
+        <key>BerthBuildCommit</key><string>abc123def456</string>
+        <key>CFBundleIconFile</key><string>AppIcon</string>
+        <key>CFBundleIconName</key><string>AppIcon</string>
+        #{extra}
+        XML
+      template
     end
 
     def config : Path
@@ -67,8 +113,104 @@ module SpecHelper
         "BERTH_BINARY"           => nil,
         "BERTH_APPLICATIONS_DIR" => applications.to_s,
         "BERTH_SKIP_CLI"         => nil,
+        "BERTH_SIGN_SCRIPT"      => (fakes / "sign-app.sh").to_s,
+        "BERTH_CODESIGN"         => (fakes / "codesign").to_s,
+        "BERTH_SIPS"             => (fakes / "sips").to_s,
+        "BERTH_ICONUTIL"         => (fakes / "iconutil").to_s,
+        "BERTH_LSREGISTER"       => (fakes / "lsregister").to_s,
+        "FAKE_SIGN_EXIT"         => nil,
+        "FAKE_SIGN_AUTHORITY"    => nil,
       } of String => String?
     end
+  end
+
+  # The stand-ins. A signed bundle carries `Contents/.fake-signature`: the
+  # signer ("adhoc" or an authority), then the identifier it was signed as.
+  module Fakes
+    extend self
+
+    def install(dir : Path) : Nil
+      Dir.mkdir_p(dir.to_s)
+      SpecHelper.write_executable(dir / "sign-app.sh", <<-SH)
+        #!/bin/sh
+        echo "$*" >> "#{dir}/sign.calls"
+        [ -n "$FAKE_SIGN_EXIT" ] && { echo "fake sign-app.sh: exit $FAKE_SIGN_EXIT" >&2; exit "$FAKE_SIGN_EXIT"; }
+        mode="$1"; shift
+        signer="${FAKE_SIGN_AUTHORITY:-Berth Release Signing}"
+        [ "$mode" = adhoc ] && signer=adhoc
+        for app in "$@"; do
+          id="$(/usr/bin/plutil -extract CFBundleIdentifier raw -o - "$app/Contents/Info.plist")"
+          printf '%s\\n%s\\n' "$signer" "$id" > "$app/Contents/.fake-signature"
+        done
+        SH
+      SpecHelper.write_executable(dir / "codesign", <<-SH)
+        #!/bin/sh
+        echo "$*" >> "#{dir}/codesign.calls"
+        for last; do :; done
+        marker="$last/Contents/.fake-signature"
+        if [ ! -f "$marker" ]; then echo "$last: code object is not signed at all" >&2; exit 1; fi
+        [ "$1" = --verify ] && exit 0
+        signer="$(sed -n 1p "$marker")"
+        echo "Executable=$last/Contents/MacOS/Berth" >&2
+        echo "Identifier=$(sed -n 2p "$marker")" >&2
+        if [ "$signer" = adhoc ]; then echo "Signature=adhoc" >&2; else echo "Authority=$signer" >&2; fi
+        SH
+      SpecHelper.write_executable(dir / "sips", <<-SH)
+        #!/bin/sh
+        echo "$*" >> "#{dir}/sips.calls"
+        for last; do :; done
+        echo "png $2x$3" > "$last"
+        SH
+      SpecHelper.write_executable(dir / "iconutil", <<-SH)
+        #!/bin/sh
+        echo "$*" >> "#{dir}/iconutil.calls"
+        ls "$5" > "$4"
+        SH
+      SpecHelper.write_executable(dir / "lsregister", <<-SH)
+        #!/bin/sh
+        echo "$*" >> "#{dir}/lsregister.calls"
+        if [ "$1" = -dump ] && [ -f "#{dir}/lsregister.dump" ]; then cat "#{dir}/lsregister.dump"; fi
+        exit 0
+        SH
+    end
+  end
+
+  # A bundle with an executable and an Info.plist holding `keys` (plist XML).
+  def write_bundle(app : Path, keys : String) : Path
+    Dir.mkdir_p((app / "Contents" / "MacOS").to_s)
+    Dir.mkdir_p((app / "Contents" / "Resources").to_s)
+    File.write((app / "Contents" / "MacOS" / "Berth").to_s, "binary")
+    File.write((app / "Contents" / "Resources" / "AppIcon.icns").to_s, "template icon")
+    File.write((app / "Contents" / "Info.plist").to_s, <<-XML)
+      <?xml version="1.0" encoding="UTF-8"?>
+      <!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+      <plist version="1.0">
+      <dict>
+      <key>CFBundleExecutable</key><string>Berth</string>
+      #{keys}
+      </dict>
+      </plist>
+      XML
+    app
+  end
+
+  # A site app as `berth sites build` leaves it, signed by `signer`.
+  def write_site_app(app : Path, site : String, bundle_id : String = "com.kellyredding.berth.#{site}",
+                     signer : String? = "Berth Release Signing") : Path
+    write_bundle(app, <<-XML)
+      <key>CFBundleIdentifier</key><string>#{bundle_id}</string>
+      <key>BerthSite</key><string>#{site}</string>
+      <key>CFBundleShortVersionString</key><string>0.1.0</string>
+      XML
+    signer.try { |name| File.write((app / "Contents" / ".fake-signature").to_s, "#{name}\n#{bundle_id}\n") }
+    app
+  end
+
+  # An app's Info.plist as JSON.
+  def plist(app : Path) : JSON::Any
+    output = IO::Memory.new
+    Process.run("/usr/bin/plutil", ["-convert", "json", "-o", "-", (app / "Contents" / "Info.plist").to_s], output: output)
+    JSON.parse(output.to_s)
   end
 
   def sandbox(&)

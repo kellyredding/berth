@@ -56,6 +56,54 @@ module Berth
       env_path("BERTH_OPEN") || Path.new("/usr/bin/open")
     end
 
+    # The programs that build and inspect site apps. Specs put stand-ins here,
+    # so they never sign anything or touch the real Launch Services database.
+    def codesign : Path
+      env_path("BERTH_CODESIGN") || Path.new("/usr/bin/codesign")
+    end
+
+    def sips : Path
+      env_path("BERTH_SIPS") || Path.new("/usr/bin/sips")
+    end
+
+    def iconutil : Path
+      env_path("BERTH_ICONUTIL") || Path.new("/usr/bin/iconutil")
+    end
+
+    def lsregister : Path
+      env_path("BERTH_LSREGISTER") ||
+        Path.new("/System/Library/Frameworks/CoreServices.framework/Versions/Current/Frameworks/" \
+                 "LaunchServices.framework/Versions/Current/Support/lsregister")
+    end
+
+    # Where `berth sites build` may find bin/lib/sign-app.sh, in the order it
+    # looks: BERTH_SIGN_SCRIPT alone when set; else the checkout this binary
+    # was built in (tools/berth/build/berth), then the installed copy.
+    def sign_script_candidates : Array(Path)
+      if script = env_path("BERTH_SIGN_SCRIPT")
+        return [script]
+      end
+      candidates = [] of Path
+      checkout_root.try { |repo| candidates << repo / "bin" / "lib" / "sign-app.sh" }
+      candidates << root / "libexec" / "sign-app.sh"
+      candidates
+    end
+
+    def sign_script : Path?
+      sign_script_candidates.find { |path| File::Info.executable?(path.to_s) && File.file?(path.to_s) }
+    end
+
+    # The repository a development binary was built in, or nil for an
+    # installed binary.
+    private def checkout_root : Path?
+      executable = Process.executable_path.try { |path| Path.new(path) }
+      return nil unless executable
+      build = executable.parent
+      tool = build.parent
+      return nil unless build.basename == "build" && tool.basename == "berth" && tool.parent.basename == "tools"
+      tool.parent.parent
+    end
+
     private def env_path(name : String) : Path?
       value = ENV[name]?
       value && !value.empty? ? Path.new(value) : nil

@@ -337,19 +337,6 @@ describe "berth sites" do
     end
   end
 
-  it "says build is not built yet, and still shows its help" do
-    SpecHelper.sandbox do |sandbox|
-      [["sites", "build", "--all"], ["sites", "build", "mail", "docs"]].each do |args|
-        result = SpecHelper.run(sandbox, args + ["--json"])
-        result.exit_code.should eq(1)
-        result.stderr.should contain("sites build is not built yet")
-        result.json["ok"].should eq(false)
-      end
-      SpecHelper.run(sandbox, ["sites", "build", "--help"]).stdout.should contain("Not built yet")
-      SpecHelper.run(sandbox, ["sites", "build", "--force"]).exit_code.should eq(2)
-    end
-  end
-
   it "removes a site, and refuses an unknown one as not found" do
     SpecHelper.sandbox do |sandbox|
       sandbox.write_config(MAIL_CONFIG)
