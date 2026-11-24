@@ -5,7 +5,7 @@ module Berth
     USAGE = <<-TEXT
       berth — web pages as standalone Mac apps
 
-      Usage: berth <command> [options]      (every command takes --json)
+      Usage: berth <command> [options]      (every command but update takes --json)
 
       Sites (the config; no app needed):
         sites list                      Every site, its name and URL
@@ -13,14 +13,23 @@ module Berth
         sites add SITE --name NAME --url URL [options]
         sites set SITE [options]        Change a site; see `berth sites --help`
         sites remove SITE
-        sites build [SITE…|--all]       Stamp, sign and install site apps (not built yet)
         config path|show|validate|export --json [--site SITE]|init [--starter] [--force]
 
-      version                           Print the version
+      Site apps (not built yet):
+        status                          Every site: built, running, version
+        sites build [SITE…|--all]       Stamp, sign and install site apps
+        open SITE [URL]                 Launch or focus a site app; load URL
+        signin SITE [--account NAME]    Fill a sign-in from 1Password
+
+      Health:
+        doctor                          Check the config (install and app checks not built yet)
+        version                         Print the version
+        update [--version X.Y.Z | --local [PATH]] [--preview] [--force]
 
       SITE is a site's name in the config (`mail`), not its display name.
 
-      Exit codes: 0 ok, 1 failed, 2 usage, 5 no such site or login.
+      Exit codes: 0 ok, 1 failed, 2 usage, 3 site app not running,
+      4 not permitted, 5 no such site or login, or its app is not built.
 
       Run `berth <command> --help` for a command's options.
       TEXT
@@ -44,10 +53,20 @@ module Berth
           ExitCode::OK
         when "version", "--version", "-V"
           Commands::Version.run(rest)
+        when "doctor"
+          Commands::Doctor.run(rest)
         when "sites"
           Commands::Sites.run(rest)
         when "config"
           Commands::ConfigFile.run(rest)
+        when "status"
+          Commands::Status.run(rest)
+        when "open"
+          Commands::Open.run(rest)
+        when "signin"
+          Commands::Signin.run(rest)
+        when "update"
+          Commands::Update.run(rest)
         else
           raise UsageError.new("unknown command #{command.inspect}")
         end
