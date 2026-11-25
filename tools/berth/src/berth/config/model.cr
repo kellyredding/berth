@@ -23,7 +23,8 @@ module Berth
 
     # One step of a sign-in: a 1Password item signed in with `flow`, or for
     # `google` only, an item whose username is handed to the page as the email.
-    record Step, flow : String, item : String?, email_from : String?
+    # `account` names the 1Password account holding it, when there are several.
+    record Step, flow : String, item : String?, email_from : String?, account : String? = nil
 
     record Site,
       id : String,

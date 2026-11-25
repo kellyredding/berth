@@ -60,6 +60,7 @@ module Berth
           json.field "flow", step.flow
           json.field "item", step.item
           json.field "email_from", step.email_from
+          json.field "account", step.account
         end
       end
     end

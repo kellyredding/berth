@@ -73,16 +73,20 @@ struct SigninStep: Decodable, Equatable {
     let flow: String
     let item: String?
     let emailFrom: String?
+    /// The 1Password account holding the item, for the CLI's `op --account`.
+    let account: String?
 
     enum CodingKeys: String, CodingKey {
         case flow, item
         case emailFrom = "email_from"
+        case account
     }
 
-    init(flow: String, item: String?, emailFrom: String?) {
+    init(flow: String, item: String?, emailFrom: String?, account: String? = nil) {
         self.flow = flow
         self.item = item
         self.emailFrom = emailFrom
+        self.account = account
     }
 
     init(from decoder: Decoder) throws {
@@ -90,5 +94,6 @@ struct SigninStep: Decodable, Equatable {
         flow = try container.decode(String.self, forKey: .flow)
         item = try container.decode(String?.self, forKey: .item)
         emailFrom = try container.decode(String?.self, forKey: .emailFrom)
+        account = try container.decode(String?.self, forKey: .account)
     }
 }

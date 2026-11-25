@@ -20,14 +20,16 @@ module Berth
       value ? "on" : "off"
     end
 
-    # A login's steps in words: `google (op://V/I)`, `google email from op://V/I`.
+    # A login's steps in words: `google (op://V/I)`, `google email from
+    # op://V/I`, each followed by ` in ACCOUNT` when it names one.
     def steps(steps : Array(Config::Step)) : String
       steps.map do |step|
-        if from = step.email_from
-          "#{step.flow} email from #{from}"
-        else
-          "#{step.flow} (#{step.item})"
-        end
+        text = if from = step.email_from
+                 "#{step.flow} email from #{from}"
+               else
+                 "#{step.flow} (#{step.item})"
+               end
+        step.account ? "#{text} in #{step.account}" : text
       end.join(", then ")
     end
   end

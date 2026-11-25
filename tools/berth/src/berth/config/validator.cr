@@ -316,11 +316,12 @@ module Berth
           error("#{where}: must be a step object, got null") if value.raw.nil?
           return nil
         end
-        allowed_keys(where, body, ["flow", "item", "email_from"])
+        allowed_keys(where, body, ["flow", "item", "email_from", "account"])
         flow = present(body, "flow").try(&.as_s?)
         unless flow && FLOWS.includes?(flow)
           error("#{where}.flow: must be one of #{FLOWS.join(", ")}, got #{body["flow"]?.try { |raw| show(raw) } || "nothing"}")
         end
+        account = check_account("#{where}.account", present(body, "account"))
         item = present(body, "item")
         email_from = present(body, "email_from")
         if item && email_from
@@ -333,19 +334,43 @@ module Berth
         if email_from && flow && flow != "google"
           error("#{where}.email_from: only a google step can give only the email")
         end
-        reference = op_reference(where, item ? "item" : "email_from", (item || email_from).not_nil!)
+        reference = item ? item_reference("#{where}.item", item) : field_reference("#{where}.email_from", email_from.not_nil!)
         return nil unless flow && FLOWS.includes?(flow) && reference
-        item ? Step.new(flow, reference, nil) : Step.new(flow, nil, reference)
+        item ? Step.new(flow, reference, nil, account) : Step.new(flow, nil, reference, account)
       end
 
-      private def op_reference(where : String, key : String, value : JSON::Any) : String?
+      # An item step reads the item's username, password and one-time code,
+      # so it names the item alone.
+      private def item_reference(where : String, value : JSON::Any) : String?
         text = value.as_s?
-        parts = text.try(&.lchop?("op://")).try(&.split('/'))
-        if text && parts && (2..4).includes?(parts.size) && parts.none? { |part| part.strip.empty? }
+        parts = OnePassword.parts(text)
+        if text && parts && parts.size == 2
           text
         else
-          error("#{where}.#{key}: must be a 1Password reference, op://VAULT/ITEM " \
+          error("#{where}: must be a 1Password item, op://VAULT/ITEM, got #{show(value)}")
+          nil
+        end
+      end
+
+      private def field_reference(where : String, value : JSON::Any) : String?
+        text = value.as_s?
+        if text && OnePassword.parts(text)
+          text
+        else
+          error("#{where}: must be a 1Password reference, op://VAULT/ITEM " \
                 "(optionally /FIELD or /SECTION/FIELD), got #{show(value)}")
+          nil
+        end
+      end
+
+      private def check_account(where : String, value : JSON::Any?) : String?
+        return nil if value.nil?
+        text = value.as_s?
+        if text && OnePassword.account?(text)
+          text
+        else
+          error("#{where}: must be a 1Password account, its sign-in address (such as example.1password.com) " \
+                "or its ID, got #{show(value)}")
           nil
         end
       end

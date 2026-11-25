@@ -127,8 +127,8 @@ registered is unregistered.
           {"flow": "google", "item": "op://Personal/Example Mail"}
         ],
         "work": [
-          {"flow": "google", "email_from": "op://Work/Example SSO"},
-          {"flow": "okta", "item": "op://Work/Example SSO"}
+          {"flow": "google", "email_from": "op://Work/Example SSO", "account": "example.1password.com"},
+          {"flow": "okta", "item": "op://Work/Example SSO", "account": "example.1password.com"}
         ]
       }
     }
@@ -167,12 +167,16 @@ bundle identifier (`com.kellyredding.berth.mail`).
   the two share: groups, classes, `\d`, `\s`, quantifiers, anchors. A match
   whose group is empty, or no match, clears the badge.
 - **`signin`**: each login is a list of steps, run in order. A step is
-  `{"flow": "google" | "okta", "item": "op://…"}`, which signs in with that
-  1Password item's username, password and one-time code, or
+  `{"flow": "google" | "okta", "item": "op://VAULT/ITEM"}`, which signs in
+  with that 1Password item's username, password and one-time code, or
   `{"flow": "google", "email_from": "op://…"}`, which gives the Google page
-  only the email (the item's username) so that Google hands off to the next
-  step's single sign-on. `berth signin SITE` uses the only login, and
-  `--account NAME` picks one when there are several.
+  only the email (the item's username, or the field the reference names) so
+  that Google hands off to the next step's single sign-on. A reference names
+  a vault and item but not the 1Password account; a step whose item is not in
+  `op`'s default account adds `"account"`, the account's sign-in address
+  (`example.1password.com`) or ID, which the CLI passes to `op --account`.
+  `berth signin SITE` uses the only login, and `--account NAME` picks one
+  when there are several.
 
 The file is strict JSON (RFC 8259, with no extensions). A file that does not
 parse, or repeats a key within one object, is invalid, and the error gives
@@ -218,17 +222,18 @@ result, writing nothing. Every problem is reported, not just the first.
 - `notifications`, `launch_at_login`: `true` or `false`.
 - `signin`: an object whose keys match `[a-z0-9][a-z0-9-]*`. Each login is a
   non-empty list of steps. A step is an object with `flow` (`google` or
-  `okta`) and exactly one of `item` and `email_from`; `email_from` goes only
-  with `google`, and a step must follow it. Each reference is
-  `op://VAULT/ITEM`, optionally followed by `/FIELD` or `/SECTION/FIELD`,
-  with no empty part. The CLI checks the shape only; it never runs `op` to
-  validate.
+  `okta`), exactly one of `item` and `email_from`, and optionally `account`;
+  `email_from` goes only with `google`, and a step must follow it. An `item`
+  is `op://VAULT/ITEM`; an `email_from` may add `/FIELD` or
+  `/SECTION/FIELD`; no part is empty. An `account` is letters, digits, dots
+  and hyphens, starting and ending with a letter or digit, at most 128
+  characters. The CLI checks the shape only; it never runs `op` to validate.
 
 ## Config export (`berth config export --json [--site SITE]`)
 
 The normalized config: defaults filled in, `icon` an absolute path, `badge`,
-`mailto` and each step's `item` and `email_from` present as `null` when
-absent.
+`mailto` and each step's `item`, `email_from` and `account` present as `null`
+when absent.
 
 ```json
 {
@@ -250,11 +255,11 @@ absent.
       "launch_at_login": true,
       "signin": {
         "personal": [
-          { "flow": "google", "item": "op://Personal/Example Mail", "email_from": null }
+          { "flow": "google", "item": "op://Personal/Example Mail", "email_from": null, "account": null }
         ],
         "work": [
-          { "flow": "google", "item": null, "email_from": "op://Work/Example SSO" },
-          { "flow": "okta", "item": "op://Work/Example SSO", "email_from": null }
+          { "flow": "google", "item": null, "email_from": "op://Work/Example SSO", "account": "example.1password.com" },
+          { "flow": "okta", "item": "op://Work/Example SSO", "email_from": null, "account": "example.1password.com" }
         ]
       }
     }

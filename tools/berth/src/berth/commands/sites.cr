@@ -29,7 +29,9 @@ module Berth
           --login NAME --steps JSON
                                    Add or replace a sign-in login: a JSON list of
                                    steps, each {"flow": "google"|"okta", "item": "op://…"}
-                                   or {"flow": "google", "email_from": "op://…"}
+                                   or {"flow": "google", "email_from": "op://…"}, with
+                                   "account": "example.1password.com" (or an account ID)
+                                   when the item is not in op's default account
           --remove-login NAME      Remove a sign-in login
 
         SITE is lowercase letters, digits and hyphens, and names the app's

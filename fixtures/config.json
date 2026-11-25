@@ -18,8 +18,8 @@
           {"flow": "google", "item": "op://Personal/Example Mail"}
         ],
         "work": [
-          {"flow": "google", "email_from": "op://Work/Example SSO"},
-          {"flow": "okta", "item": "op://Work/Example SSO"}
+          {"flow": "google", "email_from": "op://Work/Example SSO", "account": "example.1password.com"},
+          {"flow": "okta", "item": "op://Work/Example SSO", "account": "example.1password.com"}
         ]
       }
     },

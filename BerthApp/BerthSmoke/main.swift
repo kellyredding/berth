@@ -91,9 +91,9 @@ if let export = fixture {
         check("mail: two logins", mail.signin.keys.sorted() == ["personal", "work"])
         check("mail: a step with an item",
               mail.signin["personal"] == [SigninStep(flow: "google", item: "op://Personal/Example Mail", emailFrom: nil)])
-        check("mail: an email_from step, then okta", mail.signin["work"] == [
-            SigninStep(flow: "google", item: nil, emailFrom: "op://Work/Example SSO"),
-            SigninStep(flow: "okta", item: "op://Work/Example SSO", emailFrom: nil),
+        check("mail: an email_from step, then okta, each in an account", mail.signin["work"] == [
+            SigninStep(flow: "google", item: nil, emailFrom: "op://Work/Example SSO", account: "example.1password.com"),
+            SigninStep(flow: "okta", item: "op://Work/Example SSO", emailFrom: nil, account: "example.1password.com"),
         ])
     } else {
         check("the fixture has mail", false)
@@ -120,7 +120,11 @@ check("a missing nullable key is a drift, not an absence", !decodes(siteJSON(#""
 check("a missing launch_at_login is a drift", !decodes(siteJSON(#""launch_at_login":false,"#, with: "")))
 check("an http url is refused", !decodes(siteJSON("https://docs", with: "http://docs")))
 check("a step without email_from is a drift", !decodes(siteJSON(#""signin":{}"#,
-      with: #""signin":{"me":[{"flow":"okta","item":"op://V/I"}]}"#)))
+      with: #""signin":{"me":[{"flow":"okta","item":"op://V/I","account":null}]}"#)))
+check("a step without account is a drift", !decodes(siteJSON(#""signin":{}"#,
+      with: #""signin":{"me":[{"flow":"okta","item":"op://V/I","email_from":null}]}"#)))
+check("a step with every key decodes", decodes(siteJSON(#""signin":{}"#,
+      with: #""signin":{"me":[{"flow":"okta","item":"op://V/I","email_from":null,"account":"example.1password.com"}]}"#)))
 
 // MARK: - Keep matching
 

@@ -317,17 +317,55 @@ describe Berth::Config::Validator do
         .should eq(["sites.mail.signin.work[0]: an email_from step hands off to the next step's sign-in, so a step must follow it"])
     end
 
-    it "needs each reference to be op://VAULT/ITEM, optionally with a field" do
-      ["op://V/I", "op://Private Vault/Some Item", "op://V/I/password", "op://V/I/Section/field"].each do |reference|
+    it "needs an item to be op://VAULT/ITEM, since it reads the item's username, password and code" do
+      ["op://V/I", "op://Private Vault/Some Item"].each do |reference|
         SpecHelper.errors(signin(%({"me": [{"flow": "google", "item": #{reference.to_json}}]}))).should be_empty, reference
       end
-      ["op://V", "op://V/", "op:///I", "op://V/ /f", "op://V/I/S/f/x", "V/I", "https://V/I"].each do |reference|
+      ["op://V", "op://V/", "op:///I", "op://V/I/password", "op://V/I/Section/field", "op://V/ /f", "V/I", "https://V/I"].each do |reference|
         SpecHelper.errors(signin(%({"me": [{"flow": "google", "item": #{reference.to_json}}]})))
-          .should eq(["sites.mail.signin.me[0].item: must be a 1Password reference, op://VAULT/ITEM " \
+          .should eq(["sites.mail.signin.me[0].item: must be a 1Password item, op://VAULT/ITEM, got #{reference.to_json}"]), reference
+      end
+    end
+
+    it "needs an email_from to be op://VAULT/ITEM, optionally with a field" do
+      ["op://V/I", "op://V/I/username", "op://V/I/Section/email"].each do |reference|
+        SpecHelper.errors(signin(%({"me": [{"flow": "google", "email_from": #{reference.to_json}}, {"flow": "okta", "item": "op://V/I"}]})))
+          .should be_empty, reference
+      end
+      ["op://V", "op:///I", "op://V/ /f", "op://V/I/S/f/x", "V/I"].each do |reference|
+        SpecHelper.errors(signin(%({"me": [{"flow": "google", "email_from": #{reference.to_json}}, {"flow": "okta", "item": "op://V/I"}]})))
+          .should eq(["sites.mail.signin.me[0].email_from: must be a 1Password reference, op://VAULT/ITEM " \
                       "(optionally /FIELD or /SECTION/FIELD), got #{reference.to_json}"]), reference
       end
       SpecHelper.errors(signin(%({"me": [{"flow": "google", "email_from": 7}, {"flow": "okta", "item": "op://V/I"}]})))
         .first.should start_with("sites.mail.signin.me[0].email_from: must be a 1Password reference")
+    end
+
+    it "reads an optional 1Password account for each step" do
+      mail = SpecHelper.validate(signin(<<-JSON)).model!.site!("mail")
+        {
+          "work": [
+            {"flow": "google", "email_from": "op://Work/SSO", "account": "example.1password.com"},
+            {"flow": "okta", "item": "op://Work/SSO", "account": "ABCDEFGHIJKLMNOPQRSTUVWXYZ"}
+          ],
+          "personal": [{"flow": "google", "item": "op://Personal/Mail", "account": null}]
+        }
+        JSON
+      mail.signin["work"].should eq([
+        Berth::Config::Step.new("google", nil, "op://Work/SSO", "example.1password.com"),
+        Berth::Config::Step.new("okta", "op://Work/SSO", nil, "ABCDEFGHIJKLMNOPQRSTUVWXYZ"),
+      ])
+      mail.signin["personal"].first.account.should be_nil
+    end
+
+    it "needs an account to be a sign-in address or an ID" do
+      ["https://example.1password.com", "my 1password", "", ".example.com", "example.com-", "a" * 129, "me@example.com"].each do |account|
+        SpecHelper.errors(signin(%({"me": [{"flow": "google", "item": "op://V/I", "account": #{account.to_json}}]})))
+          .should eq(["sites.mail.signin.me[0].account: must be a 1Password account, its sign-in address " \
+                      "(such as example.1password.com) or its ID, got #{account.to_json}"]), account
+      end
+      SpecHelper.errors(signin(%({"me": [{"flow": "google", "item": "op://V/I", "account": 7}]})))
+        .first.should start_with("sites.mail.signin.me[0].account: must be a 1Password account")
     end
   end
 end
