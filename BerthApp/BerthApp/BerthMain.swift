@@ -3,6 +3,7 @@ import AppKit
 @MainActor
 final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuItemValidation {
     private var model: AppModel?
+    private var signinMenu: SigninMenuController?
     private var notice: MessageWindowController?
     private var pendingURLs: [URL] = []
     private var appName = "Berth"
@@ -46,6 +47,11 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuItemValidation {
                 return
             }
             self.model = model
+            if let menu = NSApp.mainMenu, let item = MainMenu.item(MainMenu.signinIdentifier, in: menu) {
+                signinMenu = SigninMenuController(
+                    item: item, separator: MainMenu.item(MainMenu.signinSeparatorIdentifier, in: menu), model: model
+                )
+            }
             if !pendingURLs.isEmpty {
                 model.openURLs(pendingURLs)
                 pendingURLs = []

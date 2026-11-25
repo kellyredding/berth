@@ -30,10 +30,31 @@ enum MainMenu {
         return menu
     }
 
+    /// Sign In with 1Password and the separator after it, both hidden until
+    /// SigninMenuController shapes them from the site's logins.
+    static let signinIdentifier = NSUserInterfaceItemIdentifier("signin")
+    static let signinSeparatorIdentifier = NSUserInterfaceItemIdentifier("signin.separator")
+
+    static func item(_ identifier: NSUserInterfaceItemIdentifier, in menu: NSMenu) -> NSMenuItem? {
+        for item in menu.items {
+            if item.identifier == identifier { return item }
+            if let submenu = item.submenu, let found = self.item(identifier, in: submenu) { return found }
+        }
+        return nil
+    }
+
     private static func fileMenu() -> NSMenu {
         let menu = NSMenu(title: "File")
         menu.addItem(item("Close Window", #selector(NSWindow.performClose(_:)), "w"))
         menu.addItem(.separator())
+        let signin = item(SigninMenuShape.title, nil, "l", [.command, .shift])
+        signin.identifier = signinIdentifier
+        signin.isHidden = true
+        menu.addItem(signin)
+        let separator = NSMenuItem.separator()
+        separator.identifier = signinSeparatorIdentifier
+        separator.isHidden = true
+        menu.addItem(separator)
         menu.addItem(item("Print…", #selector(BrowserWindowController.printPage(_:)), "p"))
         return menu
     }
@@ -86,7 +107,7 @@ enum MainMenu {
         return menu
     }
 
-    private static func item(_ title: String, _ action: Selector, _ key: String,
+    private static func item(_ title: String, _ action: Selector?, _ key: String,
                              _ modifiers: NSEvent.ModifierFlags = .command, target: AnyObject? = nil) -> NSMenuItem {
         let item = NSMenuItem(title: title, action: action, keyEquivalent: key)
         item.keyEquivalentModifierMask = key.isEmpty ? [] : modifiers

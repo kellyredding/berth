@@ -419,7 +419,8 @@ value.
   without that app it exits 5 saying to run `berth sites build`. A
   connection that never replies exits 3 without launching anything, since
   the app may have acted on the request.
-- `berth signin SITE [--account NAME]` picks the login (`--account`, or the
+- `berth signin SITE [--account NAME]` (which a site app also runs itself;
+  see below) picks the login (`--account`, or the
   only one; several without `--account` is a usage error, an unknown one
   exits 5), asks the app for `status` and exits 3 saying to run `berth open
   SITE` first when it does not answer, and only then reads 1Password: for an
@@ -439,6 +440,25 @@ value.
   `reload` to the app of every site in the config before and after the
   write. An app that is not running is skipped silently; the write never
   fails because of a reload.
+
+### What the app runs
+
+Besides `berth config export`, a site app runs `berth signin SITE --account
+LOGIN --json` when the person signs in from inside it (File → Sign In with
+1Password, or its sign-in bar), with the CLI found as in "Paths" and a
+240 s limit: the fill's 120 s, the CLI's wait for its reply and 1Password's
+approvals. The CLI reads 1Password and sends `signin.fill` back to the app's
+own socket, so values still travel only from op's stdout to that socket; the
+app reads nothing from 1Password and passes no value to the CLI. It reads
+the outcome from the exit status and the `--json` output on stdout:
+
+| Exit | `--json` | The app says |
+|---|---|---|
+| 0 | `already_signed_in` | Signed in (or already signed in) |
+| 1 | `stopped_at.reason` | The sign-in stopped, and why |
+| 4 | — | 1Password didn't approve, or isn't available |
+| 5 | — | No such login |
+| any other | `error`, else stderr's last `berth:` line | The sign-in failed, with that message |
 
 ## CLI exit codes
 

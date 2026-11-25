@@ -45,10 +45,30 @@ final class CLIRunner: @unchecked Sendable {
         return config
     }
 
-    private func run(_ arguments: [String], timeout: TimeInterval? = nil) async throws -> Data {
+    /// `berth signin SITE --account LOGIN --json`. The CLI reads 1Password
+    /// and sends the values to this app's socket; what comes back here is
+    /// only its outcome, never a value.
+    func signin(login: String) async -> SigninResult {
+        do {
+            let output = try await run(SigninCommand.arguments(site: site, login: login), timeout: SigninCommand.timeout,
+                                       keepExit: true)
+            return SigninCommand.result(status: 0, output: output, error: Data(), login: login)
+        } catch ProcessRunError.exited(_, let status, let output, let error) {
+            return SigninCommand.result(status: status, output: output, error: error, login: login)
+        } catch {
+            return .failed("Sign-in failed: \(error.localizedDescription)")
+        }
+    }
+
+    /// `keepExit` passes a non-zero exit through as ProcessRunError, so the
+    /// caller can read the status and output.
+    private func run(_ arguments: [String], timeout: TimeInterval? = nil, keepExit: Bool = false) async throws -> Data {
         guard let binary else { throw CLIError.missing(paths.binaryCandidates.map(\.path)) }
         do {
             return try await runner.run(executable: binary, arguments: arguments, timeout: timeout, environment: environment)
+        } catch let error as ProcessRunError where keepExit {
+            if case .exited = error { throw error }
+            throw CLIError.failed(error.localizedDescription)
         } catch {
             throw CLIError.failed(error.localizedDescription)
         }

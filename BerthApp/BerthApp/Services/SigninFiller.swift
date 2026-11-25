@@ -4,12 +4,14 @@ import WebKit
 /// Runs one `signin.fill` in a window's web view: polls the page with
 /// SigninScript, lets SigninRun decide, and fills or waits. It logs the steps
 /// and the selectors that matched, never a value, and drops the values when
-/// it returns.
+/// it returns. `progress` follows the step and what it waits on, for the
+/// sign-in bar.
 @MainActor
-final class SigninFiller {
+final class SigninFiller: ObservableObject {
     private static let poll: UInt64 = 400_000_000
 
     private weak var webView: WKWebView?
+    @Published private(set) var progress: SigninProgress?
 
     init(webView: WKWebView) {
         self.webView = webView
@@ -32,12 +34,14 @@ final class SigninFiller {
             if run.index != lastIndex, let flow = run.currentFlow {
                 lastIndex = run.index
                 Log.info("signin: step \(run.index + 1) of \(steps.count), \(flow.rawValue)")
+                report(run)
             }
             let page = await observe(run.index < request.steps.count ? request.steps[run.index] : nil, in: webView)
             let decision = run.next(page, now: Date())
             if run.waitingReason != lastWaiting {
                 lastWaiting = run.waitingReason
                 if let reason = lastWaiting { Log.info("signin: \(run.currentFlow?.rawValue ?? ""): \(reason)") }
+                report(run)
             }
 
             switch decision {
@@ -62,6 +66,12 @@ final class SigninFiller {
             }
             try? await Task.sleep(nanoseconds: Self.poll)
         }
+    }
+
+    private func report(_ run: SigninRun) {
+        guard let flow = run.currentFlow else { return }
+        let next = SigninProgress(step: run.index, count: run.steps.count, flow: flow.rawValue, waitingReason: run.waitingReason)
+        if next != progress { progress = next }
     }
 
     private func call(_ request: [String: Any], in webView: WKWebView) async -> Any? {

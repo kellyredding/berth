@@ -551,6 +551,147 @@ check("signin.fill replies completed, stopped_at, url and already_signed_in",
 let doneReply = replyObject(Reply.ok(SigninData(completed: [], stoppedAt: nil, url: nil, alreadySignedIn: true)))?["data"] as? [String: Any]
 check("a finished sign-in keeps stopped_at and url as null", doneReply?["stopped_at"] is NSNull && doneReply?["url"] is NSNull)
 
+// MARK: - Signing in from the app
+
+check("File → Sign In with 1Password is hidden without a login", SigninMenuShape(logins: []) == .hidden)
+check("one login is a plain item", SigninMenuShape(logins: ["work"]) == .item(login: "work"))
+check("several logins are a submenu of their names",
+      SigninMenuShape(logins: ["personal", "work"]) == .submenu(logins: ["personal", "work"]))
+check("the app runs berth signin for the login, with --json",
+      SigninCommand.arguments(site: "mail", login: "work") == ["signin", "mail", "--account", "work", "--json"])
+check("its timeout covers the fill and 1Password's approvals", SigninCommand.timeout >= SigninRun.timeout + 60 + 10)
+
+func signinOutput(_ json: String) -> Data { Data(json.utf8) }
+check("exit 0 is signed in", SigninCommand.result(status: 0, output: signinOutput(
+    #"{"ok": true, "completed": ["google"], "stopped_at": null, "already_signed_in": false}"#), error: Data(), login: "work")
+      == .signedIn(already: false))
+check("exit 0 with already_signed_in says so", SigninCommand.result(status: 0, output: signinOutput(
+    #"{"ok": true, "completed": [], "stopped_at": null, "already_signed_in": true}"#), error: Data(), login: "work")
+      == .signedIn(already: true))
+check("exit 1 with stopped_at is the reason", SigninCommand.result(status: 1, output: signinOutput(
+    #"{"ok": false, "stopped_at": {"step": 1, "flow": "okta", "reason": "waiting for you: approve the Okta sign-in"}, "code": "stopped"}"#),
+    error: Data(), login: "work") == .stopped(reason: "waiting for you: approve the Okta sign-in"))
+check("exit 4 is 1Password", SigninCommand.result(status: 4, output: signinOutput(
+    #"{"ok": false, "error": "1Password declined to give the username", "code": "not_permitted"}"#), error: Data(), login: "work")
+      == .failed("1Password didn't approve, or isn't available."))
+check("exit 5 is an unknown login", SigninCommand.result(status: 5, output: Data(), error: Data(), login: "school")
+      == .failed("There's no login named “school” in this site's config."))
+check("anything else is the CLI's message", SigninCommand.result(status: 1, output: signinOutput(
+    #"{"ok": false, "error": "a sign-in is already being filled in this app", "code": "unavailable"}"#), error: Data(), login: "work")
+      == .failed("Sign-in failed: a sign-in is already being filled in this app"))
+check("without JSON, the CLI's last berth: line", SigninCommand.result(status: 3, output: Data(),
+    error: Data("filling Mail's sign-in\nberth: mail's app did not reply within 130 s\n".utf8), login: "work")
+      == .failed("Sign-in failed: mail's app did not reply within 130 s"))
+check("without any message, the status", SigninCommand.result(status: 9, output: Data(), error: Data(), login: "work")
+      == .failed("Sign-in failed: berth exited with status 9"))
+check("the filler's reply is a result too",
+      SigninResult(SigninData(completed: ["google"], stoppedAt: nil, url: nil, alreadySignedIn: false)) == .signedIn(already: false)
+        && SigninResult(SigninData(completed: [], stoppedAt: SigninStop(step: 0, flow: "okta", reason: "r"), url: nil,
+                                   alreadySignedIn: false)) == .stopped(reason: "r"))
+
+let twoLogins: [String: [SigninStep]] = [
+    "work": [SigninStep(flow: "google", item: nil, emailFrom: "op://Work/Example SSO"),
+             SigninStep(flow: "okta", item: "op://Work/Example SSO", emailFrom: nil)],
+    "personal": [SigninStep(flow: "google", item: "op://Personal/Example Mail", emailFrom: nil)],
+]
+let mailKeep = KeepList(["mail.example.com", "127.0.0.1"])
+func barState(_ signin: [String: [SigninStep]] = twoLogins, host: String? = "accounts.google.com") -> SigninBarState {
+    var state = SigninBarState()
+    state.configure(name: "Mail", signin: signin, keep: mailKeep)
+    state.pageChanged(host: host)
+    return state
+}
+
+let signedOut = barState()
+check("bar: on Google's sign-in, with logins, it offers to sign in", signedOut.display == .offer
+      && signedOut.presentation == .init(symbol: "person.badge.key.fill", tone: .normal, message: "Signed out of Mail.",
+                                         button: "Sign In with 1Password", spinning: false, dismissible: true))
+check("bar: logins are sorted, and the menu lists them", signedOut.logins == ["personal", "work"]
+      && signedOut.menu == .submenu(logins: ["personal", "work"]) && signedOut.menuEnabled)
+check("bar: any Okta tenant a login uses is a sign-in page", barState(host: "example.okta.com").display == .offer)
+check("bar: Okta is not a sign-in page when no login uses it",
+      barState(["personal": twoLogins["personal"]!], host: "example.okta.com").display == .hidden)
+check("bar: no logins, no bar and no menu item", barState([:]).display == .hidden && barState([:]).menu == .hidden
+      && !barState([:]).menuEnabled)
+check("bar: the site itself shows none", barState(host: "mail.example.com").display == .hidden
+      && barState(host: "mail.example.com").onSite)
+var marked = barState(host: "127.0.0.1")
+check("bar: a page on another host is not a sign-in page by its host", marked.display == .hidden)
+marked.markers(seen: true)
+check("bar: but is by a flow's markers", marked.display == .offer && !marked.onSite)
+marked.pageChanged(host: "127.0.0.1")
+check("bar: the same host keeps its markers until they are looked for again", marked.display == .offer)
+marked.pageChanged(host: "mail.example.com")
+check("bar: a new host forgets them", marked.display == .hidden && !marked.markerSeen)
+
+var dismissedBar = barState()
+dismissedBar.dismiss()
+check("bar: × hides it", dismissedBar.display == .hidden)
+dismissedBar.pageChanged(host: "example.okta.com")
+check("bar: and it stays hidden across sign-in pages", dismissedBar.display == .hidden)
+dismissedBar.pageChanged(host: "mail.example.com")
+dismissedBar.pageChanged(host: "accounts.google.com")
+check("bar: until the page leaves them and comes back", dismissedBar.display == .offer)
+
+var fromApp = barState()
+fromApp.launched(login: "work")
+check("bar: the app's own sign-in waits for 1Password first", fromApp.display == .waitingFor1Password
+      && fromApp.presentation?.message == "Waiting for 1Password…" && fromApp.presentation?.spinning == true
+      && fromApp.presentation?.button == nil && fromApp.presentation?.dismissible == false)
+check("bar: and the menu is disabled while it runs", !fromApp.menuEnabled && fromApp.menu == .submenu(logins: ["personal", "work"]))
+fromApp.fillStarted(flows: ["google", "okta"])
+check("bar: then the fill's steps", fromApp.presentation?.message == "Signing in: google (1 of 2)…")
+fromApp.progressed(SigninProgress(step: 1, count: 2, flow: "okta"))
+check("bar: step by step", fromApp.presentation?.message == "Signing in: okta (2 of 2)…")
+fromApp.progressed(SigninProgress(step: 1, count: 2, flow: "okta", waitingReason: "waiting for you: approve the Okta sign-in"))
+check("bar: and what it waits on", fromApp.presentation?.message == "Waiting for you: approve the Okta sign-in")
+fromApp.fillFinished(.signedIn(already: false))
+check("bar: signed in", fromApp.presentation?.message == "Signed in to Mail." && fromApp.presentation?.tone == .success
+      && fromApp.isRunning)
+fromApp.cliFinished(.signedIn(already: false))
+fromApp.pageChanged(host: "mail.example.com")
+check("bar: still says so on the site, briefly", fromApp.display == .result(.signedIn(already: false)) && fromApp.menuEnabled)
+fromApp.expireSuccess()
+check("bar: then hides", fromApp.display == .hidden)
+
+var fromTerminal = barState(host: "mail.example.com")
+fromTerminal.fillStarted(flows: ["google"])
+check("bar: a terminal's sign-in shows its progress, with no wait for 1Password",
+      fromTerminal.presentation?.message == "Signing in: google (1 of 1)…" && fromTerminal.isRunning && !fromTerminal.menuEnabled)
+fromTerminal.fillFinished(.signedIn(already: true))
+check("bar: already signed in says so", fromTerminal.presentation?.message == "Already signed in to Mail." && !fromTerminal.isRunning)
+
+var stopped = barState()
+stopped.launched(login: "work")
+stopped.fillStarted(flows: ["google", "okta"])
+stopped.fillFinished(.stopped(reason: "the page didn't accept the password on the okta password step"))
+check("bar: a stop shows while the CLI finishes, with nothing to click",
+      stopped.presentation?.button == nil && stopped.presentation?.dismissible == false)
+stopped.cliFinished(.stopped(reason: "the page didn't accept the password on the okta password step"))
+stopped.expireSuccess()
+check("bar: a stop stays, offering to try again",
+      stopped.presentation == .init(symbol: "exclamationmark.triangle.fill", tone: .warning,
+                                    message: "Sign-in stopped: the page didn't accept the password on the okta password step",
+                                    button: "Try Again", spinning: false, dismissible: true))
+stopped.pageChanged(host: "example.okta.com")
+check("bar: across sign-in pages", stopped.display == .result(.stopped(reason: "the page didn't accept the password on the okta password step")))
+stopped.pageChanged(host: "mail.example.com")
+check("bar: until the page reaches the site", stopped.display == .hidden)
+
+var declined = barState(host: "mail.example.com")
+declined.launched(login: "personal")
+declined.cliFinished(.failed("1Password didn't approve, or isn't available."))
+check("bar: a CLI error shows even on the site", declined.presentation?.message == "1Password didn't approve, or isn't available."
+      && declined.presentation?.button == "Try Again")
+declined.pageChanged(host: "mail.example.com")
+check("bar: and stays until dismissed", declined.display == .result(.failed("1Password didn't approve, or isn't available.")))
+declined.dismiss()
+check("bar: × clears it", declined.display == .hidden)
+var retried = barState()
+retried.cliFinished(.failed("Sign-in failed: x"))
+retried.launched(login: "work")
+check("bar: trying again replaces it", retried.display == .waitingFor1Password)
+
 // MARK: - Small rules
 
 check("no build commit is a development build", BuildLabel.text(commit: nil) == "development build")

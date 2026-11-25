@@ -22,8 +22,10 @@ final class AppModel: ObservableObject {
     private var pendingURLs: [URL] = []
     private var badgeRule: BadgeRule?
     private var loggedFirstPage = false
-    private var signingIn = false
+    private var successExpiry = 0
     @Published private(set) var badge: String?
+    /// File → Sign In with 1Password and the main window's sign-in bar.
+    @Published private(set) var signinBar = SigninBarState()
 
     init(paths: BerthPaths, site: String) {
         self.paths = paths
@@ -108,6 +110,7 @@ final class AppModel: ObservableObject {
         }
         updateBadge(title: mainWindow?.webView.title)
         LaunchAtLoginChoice.apply(configured: config.launchAtLogin, site: site)
+        signinBar.configure(name: config.name, signin: config.signin, keep: config.keep)
 
         if mainWindow == nil { createMainWindow(config) }
     }
@@ -178,6 +181,12 @@ final class AppModel: ObservableObject {
 
     func mainTitleChanged(_ title: String?) {
         updateBadge(title: title)
+    }
+
+    /// The main window's page moved, by a load, a redirect or the page's own
+    /// history.
+    func mainPageChanged(_ url: URL?) {
+        signinBar.pageChanged(host: url.flatMap { LinkPolicy.isWeb($0) ? $0.host : nil })
     }
 
     func mainPageFinished(_ url: URL?) {
@@ -258,15 +267,19 @@ final class AppModel: ObservableObject {
     }
 
     /// Fills the main window's sign-in, one at a time, in front of the person
-    /// who may have to approve a step.
+    /// who may have to approve a step. The request comes from the app's own
+    /// run of the CLI or from a terminal's; the bar shows its progress either
+    /// way.
     func signin(_ request: SigninRequest) async -> Result<SigninData, RequestError> {
         guard let mainWindow, let config = configStore.config else { return .failure(.noConfig) }
-        guard !signingIn else { return .failure(.signinBusy) }
-        signingIn = true
-        defer { signingIn = false }
+        guard !signinBar.filling else { return .failure(.signinBusy) }
+        signinBar.fillStarted(flows: request.flows)
         showMainWindow()
         Log.info("signin: filling \(request)")
-        let data = await SigninFiller(webView: mainWindow.webView).run(request, siteHost: config.url.host)
+        let filler = SigninFiller(webView: mainWindow.webView)
+        let progress = filler.$progress.compactMap { $0 }.sink { [weak self] in self?.signinBar.progressed($0) }
+        let data = await filler.run(request, siteHost: config.url.host)
+        progress.cancel()
         if data.alreadySignedIn {
             Log.info("signin: signed in already; nothing to do")
         } else if let stop = data.stoppedAt {
@@ -274,6 +287,52 @@ final class AppModel: ObservableObject {
         } else {
             Log.info("signin: done (\(data.completed.joined(separator: ", ")))")
         }
+        signinBar.fillFinished(SigninResult(data))
+        expireSuccessLater()
         return .success(data)
+    }
+
+    // MARK: - Signing in from the app
+
+    /// Runs `berth signin` for one of the site's logins, as the menu and the
+    /// bar do: the CLI reads 1Password and sends the fill back to this app's
+    /// socket, which `signin(_:)` answers.
+    func startSignin(login: String) {
+        guard signinBar.logins.contains(login), !signinBar.isRunning else { return }
+        signinBar.launched(login: login)
+        Log.info("signin: running berth signin \(site) --account \(login)")
+        Task { [weak self] in
+            guard let self else { return }
+            let result = await self.cli.signin(login: login)
+            self.signinFinished(result, login: login)
+        }
+    }
+
+    func dismissSigninBar() {
+        signinBar.dismiss()
+    }
+
+    private func signinFinished(_ result: SigninResult, login: String) {
+        switch result {
+        case .signedIn: Log.info("signin: berth signin --account \(login) finished")
+        case .stopped(let reason): Log.info("signin: berth signin --account \(login) stopped: \(reason)")
+        case .failed(let message): Log.error("signin: berth signin --account \(login): \(message)")
+        }
+        signinBar.cliFinished(result)
+        expireSuccessLater()
+    }
+
+    /// "Signed in" shows briefly, then the bar hides; a later result restarts
+    /// the wait.
+    private func expireSuccessLater() {
+        guard signinBar.result?.succeeded == true else { return }
+        successExpiry += 1
+        let token = successExpiry
+        DispatchQueue.main.asyncAfter(deadline: .now() + SigninBarState.successDuration) { [weak self] in
+            MainActor.assumeIsolated {
+                guard let self, self.successExpiry == token else { return }
+                self.signinBar.expireSuccess()
+            }
+        }
     }
 }
