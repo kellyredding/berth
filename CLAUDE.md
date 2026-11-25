@@ -13,10 +13,29 @@ side that touches it changes the contract and both sides in the same commit.
 
 ## This repository is public
 
-**Never commit anything personal**: no real sites, accounts, email addresses,
-1Password vault or item names, or icons from anyone's own config. Fixtures,
-specs and `config/starter.json` use `example.com` sites only (`docs`, `mail`).
-Personal configs and their icons live outside the repository.
+The rule: **how a product's public pages work may be committed; anything
+about a particular person or account may not.** It covers source, comments,
+specs, fixtures, docs, config and commit messages.
+
+- **May be committed:** what is the same for every user and visible to
+  anyone, as Berth's built-in `google` and `okta` sign-in flows are: field
+  selectors, button text, and the product's own hosts (`accounts.google.com`,
+  `*.okta.com`).
+- **Never committed:** real sites and their URLs; tenants and their hosts;
+  email addresses and usernames; 1Password accounts, vaults, items and IDs;
+  which verification method an account uses; icons; personal paths
+  (`/Users/<name>/…`). All of that belongs in the user's own config and
+  environment, outside the repository: `~/.berth/config.json` (or wherever
+  `BERTH_CONFIG` points) and their shell profile.
+
+Fixtures, specs and `config/starter.json` use `example.com` sites only
+(`docs`, `mail`), placeholder 1Password references (`op://V/I`,
+`op://Work/…`, `op://Example Vault/…`) and `example.1password.com`.
+
+`make audit` checks this, and `make check` runs it first. **It scans
+git-tracked files only**, so a new file is invisible to it until staged:
+stage first, then audit. A leak that reaches a commit cannot be undone by a
+later commit, so run it before committing.
 
 ## Branches and releases
 
