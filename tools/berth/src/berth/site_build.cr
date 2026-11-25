@@ -81,8 +81,8 @@ module Berth
         site.app
       end
 
-      # Beside the app, so the swap is a rename on one volume. Hidden, and
-      # not named .app, so Finder and Launch Services pass over it.
+      # Beside the app, so the swap is a rename on one volume. Launch Services
+      # registers it anyway (seen on macOS 26.6), so `swap` unregisters it.
       def staging : Path
         app.parent / ".#{app.basename}.berth-new"
       end
@@ -310,6 +310,7 @@ module Berth
         raise Error.new("could not move #{plan.site.name}'s new app into place: #{error.message}")
       end
       FileUtils.rm_rf(plan.old.to_s) if moved_aside
+      [plan.staging, plan.old].each { |gone| MacOS::LaunchServices.unregister(gone.to_s) }
     end
 
     private def describe(status : Process::Status) : String

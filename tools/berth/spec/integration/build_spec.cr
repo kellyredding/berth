@@ -69,7 +69,7 @@ describe "berth sites build" do
     end
   end
 
-  it "registers each app with Launch Services and unregisters development builds" do
+  it "registers each app with Launch Services and unregisters its staging copies and development builds" do
     SpecHelper.sandbox do |sandbox|
       sandbox.write_template
       sandbox.register([{"/src/berth/BerthApp/build/Build/Products/Release/Berth.app", "com.kellyredding.berth"},
@@ -77,6 +77,8 @@ describe "berth sites build" do
       result = build(sandbox, ["docs"])
       result.exit_code.should eq(0), result.stderr
       sandbox.calls("lsregister").should eq([
+        "-u #{sandbox.applications}/.Docs.app.berth-new",
+        "-u #{sandbox.applications}/.Docs.app.berth-old",
         "-f #{sandbox.applications}/Docs.app",
         "-dump",
         "-u /src/berth/BerthApp/build/Build/Products/Release/Berth.app",
