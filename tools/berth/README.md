@@ -46,7 +46,10 @@ site's running app fill each sign-in page, waiting up to two minutes for a
 push you approve. It prints the steps completed, or where the app stopped
 and why. The app must be running (`berth open SITE`; exit 3 otherwise); a
 declined 1Password approval exits 4. Values travel from op's stdout to the
-app's socket and nowhere else: not argv, output, `--json` or a log.
+app's socket and nowhere else: not argv, output, `--json` or a log. A site
+app runs this same command, with `--account` and `--json`, when you sign in
+from inside it (File → Sign In with 1Password, or its sign-in bar), and
+reads the outcome from the exit code and the JSON.
 
 **Building site apps:** `sites build [SITE…|--all] [--template PATH] [--sign
 op|adhoc] [--preview]` copies the template (`~/.berth/template/Berth.app`, or

@@ -74,7 +74,22 @@ final class SigninFiller: ObservableObject {
         if next != progress { progress = next }
     }
 
+    /// Whether the page shows any of these flows' marker elements, as the
+    /// fill's own observation sees them: a flow's sign-in page served from a
+    /// host it does not list (a custom domain, a local fixture).
+    static func showsMarker(of flows: [SigninFlow], in webView: WKWebView) async -> Bool {
+        for flow in flows {
+            let result = await call(["op": "observe", "spec": flow.spec.scriptArgument, "method": NSNull()], in: webView)
+            if (result as? [String: Any])?["marker"] is String { return true }
+        }
+        return false
+    }
+
     private func call(_ request: [String: Any], in webView: WKWebView) async -> Any? {
+        await Self.call(request, in: webView)
+    }
+
+    private static func call(_ request: [String: Any], in webView: WKWebView) async -> Any? {
         do {
             return try await webView.callAsyncJavaScript(
                 SigninScript.body, arguments: ["request": request], in: nil, contentWorld: .defaultClient

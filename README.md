@@ -54,7 +54,10 @@ subdomain); redirects and form posts stay wherever they go, so a sign-in
 through other hosts finishes in the app; `icon` is
 a PNG beside the config; `badge.title` is a regular expression whose one
 capture group, found in the page title, becomes the Dock badge. `signin` names
-logins whose steps fill a sign-in page from 1Password items.
+logins whose steps fill a sign-in page from 1Password items: from the app's
+File → Sign In with 1Password (⇧⌘L), from the bar it shows above a sign-in
+page, or with `berth signin SITE` in a terminal. The bar follows each step
+of the sign-in, whichever started it.
 
 ```bash
 berth sites list

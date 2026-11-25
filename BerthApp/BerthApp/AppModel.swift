@@ -25,7 +25,12 @@ final class AppModel: ObservableObject {
     private var successExpiry = 0
     @Published private(set) var badge: String?
     /// File → Sign In with 1Password and the main window's sign-in bar.
-    @Published private(set) var signinBar = SigninBarState()
+    @Published private(set) var signinBar = SigninBarState() {
+        didSet {
+            let message = signinBar.presentation?.message
+            if message != oldValue.presentation?.message { Log.info("signin bar: \(message ?? "hidden")") }
+        }
+    }
 
     init(paths: BerthPaths, site: String) {
         self.paths = paths
@@ -310,6 +315,12 @@ final class AppModel: ObservableObject {
 
     func dismissSigninBar() {
         signinBar.dismiss()
+    }
+
+    /// Whether the main window's page shows a sign-in flow's markers.
+    func signinMarkers(seen: Bool) {
+        guard seen != signinBar.markerSeen else { return }
+        signinBar.markers(seen: seen)
     }
 
     private func signinFinished(_ result: SigninResult, login: String) {

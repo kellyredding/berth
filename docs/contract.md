@@ -23,7 +23,9 @@ check pass; a mismatch means the contract changes first.
 - **The app is the actor.** Each site app shows its site in a WebKit view,
   keeps it signed in, decides which links stay in the app, badges its Dock
   tile, forwards notifications, handles the URL schemes it claims, and fills
-  sign-in forms it is sent. It never reads or writes the config file itself.
+  sign-in forms it is sent, which it may ask for itself by running `berth
+  signin` ("What the app runs"). It never reads or writes the config file
+  itself, or 1Password.
 - **The CLI is the client, and the only reader and writer of the config.** A
   site app gets its site's resolved config by running
   `berth config export --site SITE --json`. The CLI builds, signs and

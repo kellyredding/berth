@@ -1,4 +1,5 @@
 import AppKit
+import Combine
 import WebKit
 
 /// One window showing the site: the main window, or a second window for an
@@ -9,11 +10,20 @@ final class BrowserWindowController: NSWindowController, NSWindowDelegate, WKNav
     NSMenuItemValidation {
     enum Role { case main, popup }
 
+    /// When a finished page is looked at again for a sign-in's markers: a
+    /// sign-in widget often draws itself after the load.
+    private static let markerChecks: [TimeInterval] = [0, 1.5]
+
     let role: Role
     let webView: WKWebView
     private unowned let model: AppModel
     private let findBar = FindBar()
     private var findBarHeight: NSLayoutConstraint!
+    /// The main window only: sign in with 1Password, above the find bar.
+    private var signinBar: SigninBarView?
+    private var signinBarHeight: NSLayoutConstraint?
+    private var signinBarSubscription: AnyCancellable?
+    private var markerCheck = 0
     private var observations: [NSKeyValueObservation] = []
     /// Popups only: whether the window appears, or hands off and closes.
     private var popupGate: PopupGate?
@@ -40,6 +50,7 @@ final class BrowserWindowController: NSWindowController, NSWindowDelegate, WKNav
         webView.allowsBackForwardNavigationGestures = true
         webView.allowsMagnification = true
         webView.pageZoom = model.pageZoom
+        if role == .main { signinBar = SigninBarView() }
         layOut(in: window)
 
         switch role {
@@ -56,6 +67,14 @@ final class BrowserWindowController: NSWindowController, NSWindowDelegate, WKNav
         observations.append(webView.observe(\.title, options: [.initial, .new]) { [weak self] _, _ in
             MainActor.assumeIsolated { self?.titleChanged() }
         })
+        if role == .main {
+            observations.append(webView.observe(\.url, options: [.initial, .new]) { [weak self] _, _ in
+                MainActor.assumeIsolated { self?.urlChanged() }
+            })
+            signinBarSubscription = model.$signinBar
+                .removeDuplicates()
+                .sink { [weak self] in self?.showSigninBar($0) }
+        }
     }
 
     @available(*, unavailable)
@@ -73,18 +92,35 @@ final class BrowserWindowController: NSWindowController, NSWindowDelegate, WKNav
         window.makeKeyAndOrderFront(nil)
     }
 
+    /// Top to bottom: the sign-in bar (main window only), the find bar, the
+    /// page. A hidden bar has no height, so the page never sits beneath one.
     private func layOut(in window: NSWindow) {
         let container = NSView()
         findBar.isHidden = true
         findBar.onFind = { [weak self] text, backwards in self?.find(text, backwards: backwards) }
         findBar.onClose = { [weak self] in self?.closeFindBar() }
-        for view in [findBar, webView] as [NSView] {
+        for view in [signinBar, findBar, webView].compactMap({ $0 }) as [NSView] {
             view.translatesAutoresizingMaskIntoConstraints = false
             container.addSubview(view)
         }
+        var top = container.topAnchor
+        if let signinBar {
+            signinBar.isHidden = true
+            signinBar.onSignIn = { [weak self] login in self?.model.startSignin(login: login) }
+            signinBar.onDismiss = { [weak self] in self?.model.dismissSigninBar() }
+            let height = signinBar.heightAnchor.constraint(equalToConstant: 0)
+            signinBarHeight = height
+            NSLayoutConstraint.activate([
+                signinBar.topAnchor.constraint(equalTo: container.topAnchor),
+                signinBar.leadingAnchor.constraint(equalTo: container.leadingAnchor),
+                signinBar.trailingAnchor.constraint(equalTo: container.trailingAnchor),
+                height,
+            ])
+            top = signinBar.bottomAnchor
+        }
         findBarHeight = findBar.heightAnchor.constraint(equalToConstant: 0)
         NSLayoutConstraint.activate([
-            findBar.topAnchor.constraint(equalTo: container.topAnchor),
+            findBar.topAnchor.constraint(equalTo: top),
             findBar.leadingAnchor.constraint(equalTo: container.leadingAnchor),
             findBar.trailingAnchor.constraint(equalTo: container.trailingAnchor),
             findBarHeight,
@@ -100,6 +136,50 @@ final class BrowserWindowController: NSWindowController, NSWindowDelegate, WKNav
         let title = webView.title ?? ""
         window?.title = title.isEmpty ? model.displayName : title
         if role == .main { model.mainTitleChanged(webView.title) }
+    }
+
+    // MARK: - Sign-in bar
+
+    private func urlChanged() {
+        model.mainPageChanged(webView.url)
+    }
+
+    private func showSigninBar(_ state: SigninBarState) {
+        guard let signinBar, let signinBarHeight else { return }
+        if let presentation = state.presentation {
+            signinBar.show(presentation, logins: state.logins)
+            signinBar.isHidden = false
+            signinBarHeight.constant = SigninBarView.height
+        } else {
+            signinBar.isHidden = true
+            signinBarHeight.constant = 0
+        }
+    }
+
+    /// A page on a host no sign-in flow lists may still be one of their
+    /// pages; look for the flows' markers once it has loaded, and again once
+    /// its scripts have had a moment to draw.
+    private func checkSigninMarkers() {
+        markerCheck += 1
+        let check = markerCheck
+        for delay in Self.markerChecks {
+            DispatchQueue.main.asyncAfter(deadline: .now() + delay) { [weak self] in
+                MainActor.assumeIsolated { self?.checkSigninMarkers(check) }
+            }
+        }
+    }
+
+    private func checkSigninMarkers(_ check: Int) {
+        let state = model.signinBar
+        guard check == markerCheck, !state.logins.isEmpty,
+              !state.flows.contains(where: { $0.spec.hosts.keeps(host: state.host) }) else { return }
+        let host = webView.url?.host
+        Task { [weak self] in
+            guard let self else { return }
+            let seen = await SigninFiller.showsMarker(of: state.flows, in: self.webView)
+            guard check == self.markerCheck, self.webView.url?.host == host else { return }
+            self.model.signinMarkers(seen: seen)
+        }
     }
 
     // MARK: - Window
@@ -318,7 +398,9 @@ final class BrowserWindowController: NSWindowController, NSWindowDelegate, WKNav
     }
 
     func webView(_ webView: WKWebView, didFinish navigation: WKNavigation!) {
-        if role == .main { model.mainPageFinished(webView.url) }
+        guard role == .main else { return }
+        model.mainPageFinished(webView.url)
+        checkSigninMarkers()
     }
 
     func webView(_ webView: WKWebView, didFailProvisionalNavigation navigation: WKNavigation!, withError error: Error) {
