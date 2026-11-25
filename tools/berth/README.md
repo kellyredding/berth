@@ -38,8 +38,15 @@ brings a running app forward and loads `URL` in it (or in the default browser
 when the site does not keep its host), and otherwise launches the built app
 with `open -a`. Each running app talks over its own Unix socket
 (`<runtime>/<site>.sock`); after every config write the CLI asks each running
-app to reload, and says so only for the apps that answered. `signin` is not
-built yet: it parses its options and exits 1 saying so.
+app to reload, and says so only for the apps that answered.
+
+**Signing in:** `signin SITE [--account NAME]` reads the login's steps from
+1Password with `op` (each step may name its 1Password account) and has the
+site's running app fill each sign-in page, waiting up to two minutes for a
+push you approve. It prints the steps completed, or where the app stopped
+and why. The app must be running (`berth open SITE`; exit 3 otherwise); a
+declined 1Password approval exits 4. Values travel from op's stdout to the
+app's socket and nowhere else: not argv, output, `--json` or a log.
 
 **Building site apps:** `sites build [SITE…|--all] [--template PATH] [--sign
 op|adhoc] [--preview]` copies the template (`~/.berth/template/Berth.app`, or
@@ -106,6 +113,7 @@ directory.
 | CLI binary | `<root>/bin/berth` | `BERTH_BINARY` |
 | Site apps | `~/Applications` | `BERTH_APPLICATIONS_DIR` |
 | The program that launches an app | `/usr/bin/open` | `BERTH_OPEN` |
+| 1Password's CLI | `op` on `PATH` | `BERTH_OP` |
 | Signing script | the checkout's `bin/lib/sign-app.sh`, else `<root>/libexec/sign-app.sh` | `BERTH_SIGN_SCRIPT` |
 | `codesign`, `sips`, `iconutil`, `lsregister` | the system's | `BERTH_CODESIGN`, `BERTH_SIPS`, `BERTH_ICONUTIL`, `BERTH_LSREGISTER` |
 

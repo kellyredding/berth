@@ -55,6 +55,7 @@ run against temporary directories.
 | Install record | `<root>/installed-manifest.json` | — |
 | Site apps | `~/Applications/<name>.app` | `BERTH_APPLICATIONS_DIR` (the directory) |
 | The program `berth open` launches an app with | `/usr/bin/open` | `BERTH_OPEN` (specs) |
+| 1Password's CLI, which `berth signin` reads with | `op` on `PATH` | `BERTH_OP` (specs) |
 | The signing script `berth sites build` runs | `<checkout>/bin/lib/sign-app.sh` for a CLI built in a checkout (`tools/berth/build/berth`), else `<root>/libexec/sign-app.sh` | `BERTH_SIGN_SCRIPT` (the only one tried when set) |
 | `codesign`, `sips`, `iconutil` | `/usr/bin/…` | `BERTH_CODESIGN`, `BERTH_SIPS`, `BERTH_ICONUTIL` (specs) |
 | `lsregister` | Launch Services' own, in `CoreServices.framework` | `BERTH_LSREGISTER` (specs) |
@@ -307,7 +308,8 @@ Reply (one line of JSON, then `\n`):
 Error codes: `bad_request`, `not_permitted`, `not_found`, `unavailable` (the
 app cannot do it yet, e.g. no config loaded), `internal`. The CLI adds
 `not_running` to its own `--json` error output when there is no connection
-or no reply; the app never sends it. The CLI waits 5 s for a reply.
+or no reply; the app never sends it. The CLI waits 5 s for a reply, and
+130 s for `signin.fill`'s.
 
 ### Events
 
@@ -375,6 +377,21 @@ value.
   without that app it exits 5 saying to run `berth sites build`. A
   connection that never replies exits 3 without launching anything, since
   the app may have acted on the request.
+- `berth signin SITE [--account NAME]` picks the login (`--account`, or the
+  only one; several without `--account` is a usage error, an unknown one
+  exits 5), asks the app for `status` and exits 3 saying to run `berth open
+  SITE` first when it does not answer, and only then reads 1Password: for an
+  `item` step, `op read` of `ITEM/username` and `ITEM/password` and `op item
+  get ITEM --vault VAULT --otp` (no code when that fails); for an
+  `email_from` step, `op read` of `ITEM/username` or the field named; each
+  with `--account` when the step names one. Values come from op's stdout and
+  go into the request as bytes, never into argv, output or an error, and are
+  zeroed once sent. A declined approval, or no `op`, exits 4; an approval
+  still pending (op's "authorization timeout") is retried for up to 60 s; an
+  item, vault or field op cannot find exits 1. It prints the steps
+  completed, or where the app stopped and why (exit 1), and `--json` gives
+  the reply's keys with each step's flow and whether a password and code
+  were sent, never a value.
 - Every config write (`sites add|set|remove`, `config init`) then sends
   `reload` to the app of every site in the config before and after the
   write. An app that is not running is skipped silently; the write never

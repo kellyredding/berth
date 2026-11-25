@@ -20,7 +20,7 @@ module Berth
         open SITE [URL]                 Launch or focus a site app; load URL
         sites build [SITE…|--all] [--template PATH] [--sign op|adhoc] [--preview]
                                         Stamp, sign and install site apps
-        signin SITE [--account NAME]    Fill a sign-in from 1Password (not built yet)
+        signin SITE [--account NAME]    Fill a running app's sign-in from 1Password
 
       Health:
         doctor                          Check the config and each site's app

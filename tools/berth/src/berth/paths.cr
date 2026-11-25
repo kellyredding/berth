@@ -56,6 +56,11 @@ module Berth
       env_path("BERTH_OPEN") || Path.new("/usr/bin/open")
     end
 
+    # 1Password's CLI, found on PATH; specs put a stand-in here.
+    def op : Path
+      env_path("BERTH_OP") || Path.new("op")
+    end
+
     # The programs that build and inspect site apps. Specs put stand-ins here,
     # so they never sign anything or touch the real Launch Services database.
     def codesign : Path

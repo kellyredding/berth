@@ -4,7 +4,6 @@ describe "commands that are not built yet" do
   it "fail with exit 1 saying so, and still show their help" do
     SpecHelper.sandbox do |sandbox|
       {
-        ["signin", "mail", "--account", "work"]       => "signin is not built yet",
         ["update", "--local"]                         => "update is not built yet",
         ["update", "--version", "0.1.0", "--preview"] => "update is not built yet",
       }.each do |args, message|
@@ -17,7 +16,6 @@ describe "commands that are not built yet" do
         help.exit_code.should eq(0)
         help.stdout.should contain("Not built yet")
       end
-      SpecHelper.run(sandbox, ["signin", "mail", "--user", "x"]).exit_code.should eq(2)
     end
   end
 end

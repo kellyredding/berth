@@ -92,7 +92,16 @@ module Berth
     # The reply's `data` on success; raises NotRunning or Refused otherwise.
     def request(site : String, event : String, detail : Hash(String, JSON::Any)? = nil,
                 timeout : Time::Span = READ_TIMEOUT) : JSON::Any
-      line = exchange(site, envelope(event, detail), timeout)
+      parse_reply(site, exchange(site, "#{envelope(event, detail)}\n".to_slice, timeout))
+    end
+
+    # A request line built by the caller, ending in a newline: how
+    # `signin.fill` sends values it never turns into strings.
+    def request_line(site : String, line : Bytes, timeout : Time::Span) : JSON::Any
+      parse_reply(site, exchange(site, line, timeout))
+    end
+
+    private def parse_reply(site : String, line : String) : JSON::Any
       reply = begin
         JSON.parse(line)
       rescue JSON::ParseException
@@ -126,7 +135,7 @@ module Berth
       sites.map { |site| reload_quietly(site) }
     end
 
-    private def exchange(site : String, line : String, timeout : Time::Span) : String
+    private def exchange(site : String, line : Bytes, timeout : Time::Span) : String
       path = Paths.socket(site).to_s
       socket = begin
         UNIXSocket.new(path)
@@ -138,7 +147,7 @@ module Berth
         socket.sync = true
         socket.write_timeout = WRITE_TIMEOUT
         socket.read_timeout = timeout
-        socket << line << '\n'
+        socket.write(line)
         reply = socket.gets(chomp: true)
         if reply.nil? || reply.empty?
           raise NoReply.new(site, "no reply at #{path}")
