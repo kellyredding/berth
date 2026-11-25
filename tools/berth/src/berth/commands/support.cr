@@ -53,11 +53,10 @@ module Berth
         report_mutation(args, outcome, message) { }
       end
 
-      # A command that needs what does not exist yet: its help works, and
-      # running it fails saying so.
-      def not_built(args : Args, help : String, message : String) : Int32
-        help(args, help).try { |code| return code }
-        raise Error.new(message)
+      # A child's exit code to pass on: 128 plus the signal when a signal
+      # ended it, as a shell reports it.
+      def exit_code_for(status : Process::Status) : Int32
+        status.exit_code? || status.exit_signal?.try { |signal| 128 + signal.value } || ExitCode::FAILED
       end
     end
   end

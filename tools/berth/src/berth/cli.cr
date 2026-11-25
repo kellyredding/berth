@@ -25,7 +25,8 @@ module Berth
       Health:
         doctor                          Check the install, the config and each site's app
         version                         Print the version
-        update [--version X.Y.Z | --local [PATH]] [--preview] [--force]
+        update [--version X.Y.Z | --local [PATH]] [--preview] [--force] [--no-sites]
+                                        Install a release, then rebuild every site app
 
       SITE is a site's name in the config (`mail`), not its display name.
 

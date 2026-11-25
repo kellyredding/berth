@@ -249,6 +249,22 @@ module SpecHelper
     output.to_s.split.first
   end
 
+  # A git repository with stand-ins for bin/package and install.sh; a Berth
+  # checkout also has BerthApp/project.yml.
+  def checkout(sandbox : Sandbox, package : String = "#!/bin/sh\n", install : String = "#!/bin/sh\n",
+               berth : Bool = true) : Path
+    root = sandbox.root / "checkout"
+    Dir.mkdir_p((root / "tools").to_s)
+    Process.run("git", ["init", "-q", root.to_s]).success?.should be_true
+    write_executable(root / "bin" / "package", package)
+    write_executable(root / "install.sh", install)
+    if berth
+      Dir.mkdir_p((root / "BerthApp").to_s)
+      File.write((root / "BerthApp" / "project.yml").to_s, "name: BerthApp\n")
+    end
+    root
+  end
+
   # An app's Info.plist as JSON.
   def plist(app : Path) : JSON::Any
     output = IO::Memory.new
