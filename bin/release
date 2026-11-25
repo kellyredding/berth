@@ -183,8 +183,10 @@ libs="$(otool -arch all -L "$pkg/bin/berth")"
 outside="$(printf '%s\n' "$libs" | awk '/^\t/ {print $1}' | { grep -v '^/usr/lib/' || true; })"
 [[ -z "$outside" ]] || die "berth links libraries outside /usr/lib:"$'\n'"$libs"
 for executable in "$pkg/bin/berth" "$pkg/Berth.app/Contents/MacOS/Berth"; do
-  lipo "$executable" -verify_arch arm64 x86_64 \
-    || die "$(basename "$executable") is not universal (arm64 and x86_64)"
+  for arch in arm64 x86_64; do
+    lipo "$executable" -verify_arch "$arch" \
+      || die "$(basename "$executable") has no $arch code; a release is universal"
+  done
 done
 cmp -s "$pkg/libexec/sign-app.sh" bin/lib/sign-app.sh || die "libexec/sign-app.sh is not this commit's bin/lib/sign-app.sh"
 plist="$pkg/Berth.app/Contents/Info.plist"
