@@ -19,7 +19,7 @@
         ],
         "work": [
           {"flow": "google", "email_from": "op://Work/Example SSO", "account": "example.1password.com"},
-          {"flow": "okta", "item": "op://Work/Example SSO", "account": "example.1password.com"}
+          {"flow": "okta", "item": "op://Work/Example SSO", "account": "example.1password.com", "method": "Example Authenticator"}
         ]
       }
     },

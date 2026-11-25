@@ -35,7 +35,7 @@ module Berth
         end
       end
 
-      record Values, flow : String, username : Secret, password : Secret?, code : Secret? do
+      record Values, flow : String, username : Secret, password : Secret?, code : Secret?, method : String? = nil do
         def wipe : Nil
           username.wipe
           password.try(&.wipe)
@@ -99,7 +99,7 @@ module Berth
             password.try(&.wipe)
             raise error
           end
-          Values.new(step.flow, username, password, code)
+          Values.new(step.flow, username, password, code, step.method)
         else
           reference = step.email_from.not_nil!
           field = OnePassword.parts(reference).not_nil!.size == 2 ? "#{reference}/username" : reference
@@ -125,7 +125,8 @@ module Berth
       # buffer sized so it never reallocates, then zeroed once sent.
       private def envelope(login : String, values : Array(Values)) : IO::Memory
         secrets = values.sum { |value| [value.username, value.password, value.code].compact.sum(&.bytes.size) }
-        io = IO::Memory.new(secrets * 6 + 256 * (values.size + 1))
+        methods = values.sum { |value| value.method.try(&.to_json.bytesize) || 0 }
+        io = IO::Memory.new(secrets * 6 + methods + 256 * (values.size + 1))
         io << %({"v":) << SocketClient::ENVELOPE_VERSION << %(,"event":"signin.fill","ts":) << Time.utc.to_unix
         io << %(,"detail_data":{"login":) << login.to_json << %(,"steps":[)
         values.each_with_index do |value, index|
@@ -134,6 +135,7 @@ module Berth
           write_string(io, value.username)
           value.password.try { |password| io << %(,"password":); write_string(io, password) }
           value.code.try { |code| io << %(,"code":); write_string(io, code) }
+          value.method.try { |method| io << %(,"method":) << method.to_json }
           io << '}'
         end
         io << "]}}\n"

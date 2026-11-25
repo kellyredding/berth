@@ -91,9 +91,10 @@ if let export = fixture {
         check("mail: two logins", mail.signin.keys.sorted() == ["personal", "work"])
         check("mail: a step with an item",
               mail.signin["personal"] == [SigninStep(flow: "google", item: "op://Personal/Example Mail", emailFrom: nil)])
-        check("mail: an email_from step, then okta, each in an account", mail.signin["work"] == [
+        check("mail: an email_from step, then okta with a method, each in an account", mail.signin["work"] == [
             SigninStep(flow: "google", item: nil, emailFrom: "op://Work/Example SSO", account: "example.1password.com"),
-            SigninStep(flow: "okta", item: "op://Work/Example SSO", emailFrom: nil, account: "example.1password.com"),
+            SigninStep(flow: "okta", item: "op://Work/Example SSO", emailFrom: nil, account: "example.1password.com",
+                       method: "Example Authenticator"),
         ])
     } else {
         check("the fixture has mail", false)
@@ -120,11 +121,13 @@ check("a missing nullable key is a drift, not an absence", !decodes(siteJSON(#""
 check("a missing launch_at_login is a drift", !decodes(siteJSON(#""launch_at_login":false,"#, with: "")))
 check("an http url is refused", !decodes(siteJSON("https://docs", with: "http://docs")))
 check("a step without email_from is a drift", !decodes(siteJSON(#""signin":{}"#,
-      with: #""signin":{"me":[{"flow":"okta","item":"op://V/I","account":null}]}"#)))
+      with: #""signin":{"me":[{"flow":"okta","item":"op://V/I","account":null,"method":null}]}"#)))
 check("a step without account is a drift", !decodes(siteJSON(#""signin":{}"#,
-      with: #""signin":{"me":[{"flow":"okta","item":"op://V/I","email_from":null}]}"#)))
+      with: #""signin":{"me":[{"flow":"okta","item":"op://V/I","email_from":null,"method":null}]}"#)))
+check("a step without method is a drift", !decodes(siteJSON(#""signin":{}"#,
+      with: #""signin":{"me":[{"flow":"okta","item":"op://V/I","email_from":null,"account":null}]}"#)))
 check("a step with every key decodes", decodes(siteJSON(#""signin":{}"#,
-      with: #""signin":{"me":[{"flow":"okta","item":"op://V/I","email_from":null,"account":"example.1password.com"}]}"#)))
+      with: #""signin":{"me":[{"flow":"okta","item":"op://V/I","email_from":null,"account":"example.1password.com","method":"Example Authenticator"}]}"#)))
 
 // MARK: - Keep matching
 
@@ -305,6 +308,16 @@ check("signin.fill parses its steps", parsed(#"{"v":1,"event":"signin.fill","ts"
           SigninValues(flow: .google, username: "someone@example.com", password: nil, code: nil),
           SigninValues(flow: .okta, username: "someone", password: "pw", code: "123456"),
       ]))))
+check("signin.fill takes a step's method", parsed(#"{"v":1,"event":"signin.fill","ts":1,"detail_data":{"login":null,"steps":[{"flow":"okta","username":"someone","method":"Example Authenticator"}]}}"#)
+      == .success(.signinFill(SigninRequest(login: nil, steps: [
+          SigninValues(flow: .okta, username: "someone", password: nil, code: nil, method: "Example Authenticator"),
+      ]))))
+check("signin.fill reads a null method as none", parsed(#"{"v":1,"event":"signin.fill","ts":1,"detail_data":{"steps":[{"flow":"okta","username":"someone","method":null}]}}"#)
+      == .success(.signinFill(SigninRequest(login: nil, steps: [SigninValues(flow: .okta, username: "someone", password: nil, code: nil)]))))
+check("signin.fill refuses an empty method",
+      parsedCode(#"{"v":1,"event":"signin.fill","ts":1,"detail_data":{"steps":[{"flow":"okta","username":"a","method":""}]}}"#) == .badRequest)
+check("signin.fill refuses a method that is not a string",
+      parsedCode(#"{"v":1,"event":"signin.fill","ts":1,"detail_data":{"steps":[{"flow":"okta","username":"a","method":3}]}}"#) == .badRequest)
 check("signin.fill without steps is bad_request",
       parsedCode(#"{"v":1,"event":"signin.fill","ts":1,"detail_data":{"login":"work","steps":[]}}"#) == .badRequest)
 check("an unknown event is bad_request", parsedCode(#"{"v":1,"event":"teleport","ts":1}"#) == .badRequest)
@@ -439,6 +452,52 @@ check("okta: a password still showing after the stall stops",
       { () -> SigninDecision in var copy = classic; return copy.next(oktaPage(password: true), now: at(17)) }()
         == .finish(SigninOutcome(completed: [], stoppedAt: SigninStop(step: 0, flow: "okta",
             reason: "the page didn't accept the password on the okta password step"), alreadySignedIn: false)))
+
+check("okta: a method list is rows with a Select button, naming no method; google has none",
+      okta.methods == MethodSpec(buttons: ["Select"]) && google.methods == nil)
+check("the script gets the method list's buttons as data",
+      okta.scriptArgument["methods"] as? [String: [String]] == ["buttons": ["Select"]]
+        && google.scriptArgument["methods"] is NSNull)
+func methodList(offered: Bool) -> PageObservation {
+    PageObservation(host: "example.okta.com", marker: "#okta-sign-in", methods: true, methodOffered: offered)
+}
+func methodRun(_ method: String?) -> SigninRun {
+    var run = SigninRun(steps: [.init(flow: .okta, hasPassword: true, hasCode: true, method: method)],
+                        siteHost: "mail.example.com", start: t0)
+    run.filled([.username, .password], at: at(1))
+    return run
+}
+var listed = methodRun("Example Authenticator")
+check("okta: a method list offering the step's method chooses it",
+      listed.next(methodList(offered: true), now: at(2)) == .chooseMethod("Example Authenticator"))
+listed.choseMethod(at: at(2))
+check("okta: chooses it once, then waits for the code page", listed.next(methodList(offered: true), now: at(3)) == .wait)
+check("okta: a list that never moves on stops after the stall",
+      { () -> SigninDecision in var copy = listed; return copy.next(methodList(offered: true), now: at(18)) }()
+        == .finish(SigninOutcome(completed: [], stoppedAt: SigninStop(step: 0, flow: "okta",
+            reason: "the page didn't move on from the okta verification method list"), alreadySignedIn: false)))
+check("okta: then fills the code", listed.next(oktaPage(code: true), now: at(4)) == .fill([.code]))
+var unlisted = methodRun("Example Authenticator")
+check("okta: no method list goes straight to the code", unlisted.next(oktaPage(code: true), now: at(2)) == .fill([.code]))
+var unnamedUnlisted = methodRun(nil)
+check("okta: no method list and no method named goes straight to the code too",
+      unnamedUnlisted.next(oktaPage(code: true), now: at(2)) == .fill([.code]))
+var notOffered = methodRun("Example Authenticator")
+check("okta: a list without the step's method waits for the person", notOffered.next(methodList(offered: false), now: at(2)) == .wait
+      && notOffered.waitingReason == "waiting for you: choose a verification method (the list has no Example Authenticator)")
+var unnamed = methodRun(nil)
+check("okta: a step naming no method leaves the list to the person", unnamed.next(methodList(offered: false), now: at(2)) == .wait
+      && unnamed.waitingReason == "waiting for you: choose a verification method (this step names none)")
+check("okta: and still fills the code page the person's choice brings", unnamed.next(oktaPage(code: true), now: at(3)) == .fill([.code]))
+var lateOffer = methodRun("Example Authenticator")
+_ = lateOffer.next(methodList(offered: false), now: at(2))
+check("okta: a method offered on a later poll is chosen, and stops being waited on",
+      lateOffer.next(methodList(offered: true), now: at(3)) == .chooseMethod("Example Authenticator") && lateOffer.waitingReason == nil)
+let pushOnly = SigninRun.Step(flow: .okta, hasPassword: true, hasCode: false, method: "Example Push")
+var push = SigninRun(steps: [pushOnly], siteHost: "mail.example.com", start: t0)
+push.filled([.username, .password], at: at(1))
+check("okta: a named method is chosen whether or not 1Password has a code",
+      push.next(methodList(offered: true), now: at(2)) == .chooseMethod("Example Push"))
 
 var onlyEmail = SigninRun(steps: [.init(flow: .google, hasPassword: false, hasCode: false),
                                   .init(flow: .okta, hasPassword: true, hasCode: false)], siteHost: "mail.example.com", start: t0)

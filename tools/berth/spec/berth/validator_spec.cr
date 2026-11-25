@@ -367,6 +367,38 @@ describe Berth::Config::Validator do
       SpecHelper.errors(signin(%({"me": [{"flow": "google", "item": "op://V/I", "account": 7}]})))
         .first.should start_with("sites.mail.signin.me[0].account: must be a 1Password account")
     end
+
+    it "reads an optional verification method for an okta step" do
+      mail = SpecHelper.validate(signin(<<-JSON)).model!.site!("mail")
+        {
+          "work": [
+            {"flow": "google", "email_from": "op://Work/SSO"},
+            {"flow": "okta", "item": "op://Work/SSO", "method": "Example Authenticator"}
+          ],
+          "personal": [{"flow": "okta", "item": "op://Personal/SSO", "method": null}]
+        }
+        JSON
+      mail.signin["work"].last.should eq(Berth::Config::Step.new("okta", "op://Work/SSO", nil, nil, "Example Authenticator"))
+      mail.signin["personal"].first.method.should be_nil
+      SpecHelper.errors(signin(%({"me": [{"flow": "okta", "item": "op://V/I", "method": #{("m" * 64).to_json}}]}))).should be_empty
+    end
+
+    it "needs a method to be non-empty text of at most 64 characters" do
+      [JSON::Any.new(""), JSON::Any.new("   "), JSON::Any.new("m" * 65), JSON::Any.new(7_i64), JSON::Any.new(true),
+       JSON.parse(%(["Example Authenticator"]))].each do |method|
+        SpecHelper.errors(signin(%({"me": [{"flow": "okta", "item": "op://V/I", "method": #{method.to_json}}]})))
+          .should eq(["sites.mail.signin.me[0].method: must be the text of a verification method in Okta's list, " \
+                      "1 to 64 characters, got #{method.to_json}"]), method.to_json
+      end
+    end
+
+    it "refuses a method on a google step, since only Okta lists methods" do
+      SpecHelper.errors(signin(%({"me": [{"flow": "google", "item": "op://V/I", "method": "Example Authenticator"}]})))
+        .should eq(["sites.mail.signin.me[0].method: only an okta step chooses a verification method; Okta alone lists them"])
+      SpecHelper.errors(signin(%({"me": [{"flow": "google", "email_from": "op://V/I", "method": "Example Authenticator"},
+                                         {"flow": "okta", "item": "op://V/I"}]})))
+        .should eq(["sites.mail.signin.me[0].method: only an okta step chooses a verification method; Okta alone lists them"])
+    end
   end
 end
 

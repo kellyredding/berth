@@ -316,12 +316,13 @@ module Berth
           error("#{where}: must be a step object, got null") if value.raw.nil?
           return nil
         end
-        allowed_keys(where, body, ["flow", "item", "email_from", "account"])
+        allowed_keys(where, body, ["flow", "item", "email_from", "account", "method"])
         flow = present(body, "flow").try(&.as_s?)
         unless flow && FLOWS.includes?(flow)
           error("#{where}.flow: must be one of #{FLOWS.join(", ")}, got #{body["flow"]?.try { |raw| show(raw) } || "nothing"}")
         end
         account = check_account("#{where}.account", present(body, "account"))
+        method = check_method("#{where}.method", present(body, "method"), flow)
         item = present(body, "item")
         email_from = present(body, "email_from")
         if item && email_from
@@ -336,7 +337,7 @@ module Berth
         end
         reference = item ? item_reference("#{where}.item", item) : field_reference("#{where}.email_from", email_from.not_nil!)
         return nil unless flow && FLOWS.includes?(flow) && reference
-        item ? Step.new(flow, reference, nil, account) : Step.new(flow, nil, reference, account)
+        item ? Step.new(flow, reference, nil, account, method) : Step.new(flow, nil, reference, account, method)
       end
 
       # An item step reads the item's username, password and one-time code,
@@ -373,6 +374,21 @@ module Berth
                 "or its ID, got #{show(value)}")
           nil
         end
+      end
+
+      private def check_method(where : String, value : JSON::Any?, flow : String?) : String?
+        return nil if value.nil?
+        text = value.as_s?
+        unless text && !text.strip.empty? && text.size <= METHOD_MAX
+          error("#{where}: must be the text of a verification method in Okta's list, " \
+                "1 to #{METHOD_MAX} characters, got #{show(value)}")
+          return nil
+        end
+        if flow && flow != "okta"
+          error("#{where}: only an okta step chooses a verification method; Okta alone lists them")
+          return nil
+        end
+        text
       end
 
       private def flag(where : String, value : JSON::Any?) : Bool

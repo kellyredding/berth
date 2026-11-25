@@ -17,7 +17,7 @@ private CONFIG = <<-JSON
           "personal": [{"flow": "google", "item": "op://Personal/Example Mail"}],
           "work": [
             {"flow": "google", "email_from": "op://Work/Example SSO", "account": "example.1password.com"},
-            {"flow": "okta", "item": "op://Work/Example SSO", "account": "example.1password.com"}
+            {"flow": "okta", "item": "op://Work/Example SSO", "account": "example.1password.com", "method": "Example Authenticator"}
           ]
         }
       },
@@ -141,7 +141,7 @@ describe "berth signin" do
     end
   end
 
-  it "picks a login with --account, reading each step from its 1Password account" do
+  it "picks a login with --account, reading each step from its 1Password account and sending its method" do
     SpecHelper.sandbox do |sandbox|
       sandbox.write_config(CONFIG)
       SpecHelper.with_app(sandbox, "mail", {"status" => STATUS, "signin.fill" => filled(["google", "okta"])}) do |app|
@@ -157,9 +157,22 @@ describe "berth signin" do
         ])
         signin_request(app).should eq(JSON.parse({"login" => "work", "steps" => [
           {"flow" => "google", "username" => EMAIL},
-          {"flow" => "okta", "username" => EMAIL, "password" => PASSWORD, "code" => CODE},
+          {"flow" => "okta", "username" => EMAIL, "password" => PASSWORD, "code" => CODE, "method" => "Example Authenticator"},
         ]}.to_json))
         no_secrets(sandbox, result)
+      end
+    end
+  end
+
+  it "sends a step's method as given, and none for a step that names none" do
+    SpecHelper.sandbox do |sandbox|
+      sandbox.write_config(CONFIG.sub(%("method": "Example Authenticator"), %("method": "Enter a \\"code\\" — Example")))
+      SpecHelper.with_app(sandbox, "mail", {"status" => STATUS, "signin.fill" => filled(["google", "okta"])}) do |app|
+        result = SpecHelper.run_live(sandbox, ["signin", "mail", "--account", "work"], fake_op(sandbox))
+        result.exit_code.should eq(0), result.stderr
+        steps = signin_request(app)["steps"]
+        steps[0].as_h.has_key?("method").should be_false
+        steps[1]["method"].should eq(%(Enter a "code" — Example))
       end
     end
   end
@@ -172,7 +185,7 @@ describe "berth signin" do
           fake_op(sandbox, {"FAKE_OP_NO_OTP" => "1"}))
         result.exit_code.should eq(0), result.stderr
         op_calls(sandbox).first.should eq("--account example.1password.com read --no-newline op://Work/Example SSO/email")
-        signin_request(app)["steps"][1].as_h.keys.should eq(["flow", "username", "password"])
+        signin_request(app)["steps"][1].as_h.keys.should eq(["flow", "username", "password", "method"])
         result.json["steps"].should eq(JSON.parse(%([{"flow": "google", "password": false, "code": false},
                                                      {"flow": "okta", "password": true, "code": false}])))
         no_secrets(sandbox, result)

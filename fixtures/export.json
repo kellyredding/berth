@@ -17,11 +17,11 @@
       "launch_at_login": true,
       "signin": {
         "personal": [
-          { "flow": "google", "item": "op://Personal/Example Mail", "email_from": null, "account": null }
+          { "flow": "google", "item": "op://Personal/Example Mail", "email_from": null, "account": null, "method": null }
         ],
         "work": [
-          { "flow": "google", "item": null, "email_from": "op://Work/Example SSO", "account": "example.1password.com" },
-          { "flow": "okta", "item": "op://Work/Example SSO", "email_from": null, "account": "example.1password.com" }
+          { "flow": "google", "item": null, "email_from": "op://Work/Example SSO", "account": "example.1password.com", "method": null },
+          { "flow": "okta", "item": "op://Work/Example SSO", "email_from": null, "account": "example.1password.com", "method": "Example Authenticator" }
         ]
       }
     },

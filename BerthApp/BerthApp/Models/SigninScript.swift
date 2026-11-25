@@ -6,13 +6,18 @@ import Foundation
 /// own; FlowSpec passes them in. It defines `berthSignin(request)`, where
 /// `request.op` is:
 ///
-/// - `observe`: `{host, marker, username, password, code}`, each field the
-///   selector of its first visible match, or null.
+/// - `observe`: `{host, marker, username, password, code, methods,
+///   methodOffered}`: each field the selector of its first visible match, or
+///   null; whether a list of verification methods shows, and whether a row
+///   of it matches `request.method` (the step's, or null).
 /// - `fill`: sets `request.fills` (`[{field, value}]`) the way React and
 ///   Angular forms accept, then submits the last; returns
 ///   `{filled: [{field, selector}], submitted, missing}`.
 /// - `choose`: on an account chooser, clicks `request.identifier`'s entry or
 ///   the button to use another account; returns `{clicked}`.
+/// - `method`: clicks the button on the first row of a method list whose
+///   text holds `request.method`, ignoring case and spacing; returns
+///   `{clicked}`.
 ///
 /// Its results carry selectors, never values.
 enum SigninScript {
@@ -104,6 +109,33 @@ enum SigninScript {
         return "the Enter key";
       }
 
+      // Each method's row is the largest ancestor of its button that holds
+      // no other method's button, so its text names that method alone.
+      function methodRows(methods) {
+        const wanted = methods.buttons.map(words);
+        const buttons = [];
+        for (const node of document.querySelectorAll("button, input[type=submit], input[type=button], [role=button], a")) {
+          if (!visible(node)) continue;
+          const text = words(node.tagName === "INPUT" ? node.value : node.textContent);
+          if (wanted.indexOf(text) >= 0) buttons.push(node);
+        }
+        return buttons.map(function (button) {
+          let row = button;
+          while (row.parentElement && row.parentElement !== document.body) {
+            const parent = row.parentElement;
+            if (buttons.some(function (other) { return other !== button && parent.contains(other); })) break;
+            row = parent;
+          }
+          return { button: button, text: words(row.textContent) };
+        });
+      }
+
+      function methodRow(rows, method) {
+        const wanted = words(method);
+        if (!wanted) return null;
+        return rows.find(function (row) { return row.text.indexOf(wanted) >= 0; }) || null;
+      }
+
       function pause(milliseconds) {
         return new Promise(function (resolve) { setTimeout(resolve, milliseconds); });
       }
@@ -122,7 +154,22 @@ enum SigninScript {
           const found = find(spec.fields[name].selectors);
           result[name] = found ? found.selector : null;
         }
+        result.methods = false;
+        result.methodOffered = false;
+        if (spec.methods) {
+          const rows = methodRows(spec.methods);
+          result.methods = rows.length > 1;
+          result.methodOffered = result.methods && methodRow(rows, request.method) !== null;
+        }
         return result;
+      }
+
+      if (request.op === "method") {
+        if (!spec.methods) return { clicked: null };
+        const row = methodRow(methodRows(spec.methods), request.method);
+        if (!row) return { clicked: null };
+        row.button.click();
+        return { clicked: request.method };
       }
 
       if (request.op === "choose") {

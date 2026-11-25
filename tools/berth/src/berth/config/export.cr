@@ -61,6 +61,7 @@ module Berth
           json.field "item", step.item
           json.field "email_from", step.email_from
           json.field "account", step.account
+          json.field "method", step.method
         end
       end
     end

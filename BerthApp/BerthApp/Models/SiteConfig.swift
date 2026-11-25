@@ -75,18 +75,21 @@ struct SigninStep: Decodable, Equatable {
     let emailFrom: String?
     /// The 1Password account holding the item, for the CLI's `op --account`.
     let account: String?
+    /// For okta, the verification method to choose when Okta lists them.
+    let method: String?
 
     enum CodingKeys: String, CodingKey {
         case flow, item
         case emailFrom = "email_from"
-        case account
+        case account, method
     }
 
-    init(flow: String, item: String?, emailFrom: String?, account: String? = nil) {
+    init(flow: String, item: String?, emailFrom: String?, account: String? = nil, method: String? = nil) {
         self.flow = flow
         self.item = item
         self.emailFrom = emailFrom
         self.account = account
+        self.method = method
     }
 
     init(from decoder: Decoder) throws {
@@ -95,5 +98,6 @@ struct SigninStep: Decodable, Equatable {
         item = try container.decode(String?.self, forKey: .item)
         emailFrom = try container.decode(String?.self, forKey: .emailFrom)
         account = try container.decode(String?.self, forKey: .account)
+        method = try container.decode(String?.self, forKey: .method)
     }
 }

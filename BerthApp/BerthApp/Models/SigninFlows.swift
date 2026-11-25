@@ -27,6 +27,14 @@ struct ChooserSpec: Equatable {
     let labels: [String]
 }
 
+/// A list of verification methods, each a row with its own button. The row
+/// is found from the button, so no markup beyond the button's text is assumed.
+/// Which method to choose is the step's, from the person's config.
+struct MethodSpec: Equatable {
+    /// Text of the button on each method's row.
+    let buttons: [String]
+}
+
 struct FlowSpec: Equatable {
     /// Hosts whose pages belong to the flow.
     let hosts: KeepList
@@ -38,6 +46,8 @@ struct FlowSpec: Equatable {
     /// Whether username and password can share a page (Okta's classic widget).
     let together: Bool
     let chooser: ChooserSpec?
+    /// Shown by some sign-ins, not every time, before the code.
+    let methods: MethodSpec?
     /// Said while the flow waits on its own second factor.
     let waitingReason: String
 
@@ -59,6 +69,7 @@ struct FlowSpec: Equatable {
             "fields": Dictionary(uniqueKeysWithValues: SigninField.allCases.map { ($0.rawValue, fieldArgument(field($0))) }),
         ]
         argument["chooser"] = chooser.map { ["attribute": $0.attribute, "labels": $0.labels] as [String: Any] } ?? NSNull()
+        argument["methods"] = methods.map { ["buttons": $0.buttons] as [String: Any] } ?? NSNull()
         return argument
     }
 }
@@ -86,6 +97,7 @@ enum SigninFlow: String, Equatable {
                         submit: ["#totpNext button", "#totpNext"], labels: ["Next", "Verify"]),
         together: false,
         chooser: ChooserSpec(attribute: "data-identifier", labels: ["Use another account"]),
+        methods: nil,
         waitingReason: "waiting for you: finish Google's verification in the app"
     )
 
@@ -107,6 +119,8 @@ enum SigninFlow: String, Equatable {
                         submit: ["input[type=submit]", "button[type=submit]"], labels: ["Verify", "Next"]),
         together: true,
         chooser: nil,
+        // Identity Engine's "Verify it's you with a security method" list.
+        methods: MethodSpec(buttons: ["Select"]),
         waitingReason: "waiting for you: approve the Okta sign-in"
     )
 }
@@ -120,6 +134,16 @@ struct SigninValues: Equatable, CustomStringConvertible, CustomDebugStringConver
     let username: String
     let password: String?
     let code: String?
+    /// Not a secret: the verification method the person's config names.
+    let method: String?
+
+    init(flow: SigninFlow, username: String, password: String?, code: String?, method: String? = nil) {
+        self.flow = flow
+        self.username = username
+        self.password = password
+        self.code = code
+        self.method = method
+    }
 
     func value(_ field: SigninField) -> String? {
         switch field {
@@ -168,18 +192,19 @@ struct SigninRequest: Equatable, CustomStringConvertible, CustomDebugStringConve
                 return .failure(.badRequest("steps[\(index)].username must be a non-empty string"))
             }
             var optional: [String: String] = [:]
-            for key in ["password", "code"] {
+            for key in ["password", "code", "method"] {
                 switch step[key] {
                 case nil, .null?: break
                 case .string(let text)? where !text.isEmpty: optional[key] = text
                 default: return .failure(.badRequest("steps[\(index)].\(key) must be a non-empty string when given"))
                 }
             }
-            let unknown = Set(step.keys).subtracting(["flow", "username", "password", "code"])
+            let unknown = Set(step.keys).subtracting(["flow", "username", "password", "code", "method"])
             if let key = unknown.sorted().first {
                 return .failure(.badRequest("steps[\(index)]: unknown key \"\(key)\""))
             }
-            steps.append(SigninValues(flow: flow, username: username, password: optional["password"], code: optional["code"]))
+            steps.append(SigninValues(flow: flow, username: username, password: optional["password"],
+                                      code: optional["code"], method: optional["method"]))
         }
         return .success(SigninRequest(login: login, steps: steps))
     }
@@ -196,15 +221,22 @@ struct PageObservation: Equatable {
     var username: String?
     var password: String?
     var code: String?
+    /// Whether a list of verification methods is showing.
+    var methods: Bool
+    /// Whether that list has a row matching the step's method.
+    var methodOffered: Bool
 
     init(host: String?, loading: Bool = false, marker: String? = nil,
-         username: String? = nil, password: String? = nil, code: String? = nil) {
+         username: String? = nil, password: String? = nil, code: String? = nil,
+         methods: Bool = false, methodOffered: Bool = false) {
         self.host = host
         self.loading = loading
         self.marker = marker
         self.username = username
         self.password = password
         self.code = code
+        self.methods = methods
+        self.methodOffered = methodOffered
     }
 
     /// The script's result, or nil when it is not one.
@@ -212,7 +244,8 @@ struct PageObservation: Equatable {
         guard let fields = result as? [String: Any] else { return nil }
         func text(_ key: String) -> String? { fields[key] as? String }
         self.init(host: text("host"), loading: loading, marker: text("marker"),
-                  username: text("username"), password: text("password"), code: text("code"))
+                  username: text("username"), password: text("password"), code: text("code"),
+                  methods: fields["methods"] as? Bool ?? false, methodOffered: fields["methodOffered"] as? Bool ?? false)
     }
 }
 
@@ -234,6 +267,8 @@ enum SigninDecision: Equatable {
     case fill([SigninField])
     /// Pick the account on a Google account chooser.
     case choose
+    /// Pick this verification method from a list of them.
+    case chooseMethod(String)
     case finish(SigninOutcome)
 }
 
@@ -245,6 +280,15 @@ struct SigninRun {
         let flow: SigninFlow
         let hasPassword: Bool
         let hasCode: Bool
+        /// The verification method to choose when the flow lists them.
+        let method: String?
+
+        init(flow: SigninFlow, hasPassword: Bool, hasCode: Bool, method: String? = nil) {
+            self.flow = flow
+            self.hasPassword = hasPassword
+            self.hasCode = hasCode
+            self.method = method
+        }
     }
 
     static let timeout: TimeInterval = 120
@@ -266,6 +310,7 @@ struct SigninRun {
     private var arrived: Date?
     private var sent: [SigninField: Date] = [:]
     private var chooserTried = false
+    private var methodChosen: Date?
     private var awaySince: Date?
 
     init(steps: [Step], siteHost: String?, start: Date) {
@@ -283,6 +328,10 @@ struct SigninRun {
 
     mutating func choseAccount() {
         chooserTried = true
+    }
+
+    mutating func choseMethod(at now: Date) {
+        methodChosen = now
     }
 
     mutating func next(_ page: PageObservation?, now: Date) -> SigninDecision {
@@ -308,6 +357,25 @@ struct SigninRun {
             }
             waitingReason = "waiting for you: enter the one-time code (1Password has none for this item)"
             return .wait
+        }
+
+        if page.methods && page.username == nil && page.password == nil {
+            if let at = methodChosen {
+                if now.timeIntervalSince(at) > Self.stall {
+                    return stop("the page didn't move on from the \(name) verification method list")
+                }
+                return .wait
+            }
+            guard let method = step.method else {
+                waitingReason = "waiting for you: choose a verification method (this step names none)"
+                return .wait
+            }
+            guard page.methodOffered else {
+                waitingReason = "waiting for you: choose a verification method (the list has no \(method))"
+                return .wait
+            }
+            waitingReason = nil
+            return .chooseMethod(method)
         }
 
         let passwordShowing = page.password != nil && (spec.together || page.username == nil)
@@ -367,6 +435,7 @@ struct SigninRun {
         arrived = nil
         sent = [:]
         chooserTried = false
+        methodChosen = nil
         awaySince = nil
         waitingReason = nil
         return index < steps.count ? .wait : .finish(outcome(stop: nil))

@@ -242,6 +242,10 @@ describe "berth sites" do
         ["sites", "set", "mail", "--login", "work", "--steps", %([{"flow": "okta", "item": "Work/SSO"}])]         => "must be a 1Password item",
         ["sites", "set", "mail", "--login", "work", "--steps",
          %([{"flow": "okta", "item": "op://Work/SSO", "account": "https://example.1password.com"}])] => "must be a 1Password account",
+        ["sites", "set", "mail", "--login", "work", "--steps",
+         %([{"flow": "okta", "item": "op://Work/SSO", "method": ""}])] => "must be the text of a verification method",
+        ["sites", "set", "mail", "--login", "work", "--steps",
+         %([{"flow": "google", "item": "op://Work/SSO", "method": "Example Authenticator"}])] => "only an okta step chooses",
       }.each do |args, message|
         result = SpecHelper.run(sandbox, args)
         result.exit_code.should eq(1), "#{args.join(" ")} exited #{result.exit_code}: #{result.stderr}"
@@ -324,7 +328,7 @@ describe "berth sites" do
                                %([{"flow": "okta", "item": "op://Work/Okta"}])]).exit_code.should eq(0)
       logins = SpecHelper.run(sandbox, ["sites", "show", "mail", "--json"]).json["signin"]
       logins.as_h.keys.should eq(["work", "personal"])
-      logins["work"].should eq(JSON.parse(%([{"flow": "okta", "item": "op://Work/Okta", "email_from": null, "account": null}])))
+      logins["work"].should eq(JSON.parse(%([{"flow": "okta", "item": "op://Work/Okta", "email_from": null, "account": null, "method": null}])))
 
       SpecHelper.run(sandbox, ["sites", "set", "mail", "--login", "work", "--steps",
                                %([{"flow": "okta", "item": "op://Work/Okta", "account": "example.1password.com"}])]).exit_code.should eq(0)
@@ -332,6 +336,12 @@ describe "berth sites" do
       SpecHelper.run(sandbox, ["sites", "show", "mail", "--json"]).json["signin"]["work"][0]["account"].should eq("example.1password.com")
       SpecHelper.run(sandbox, ["sites", "show", "mail"]).stdout
         .should contain("work: okta (op://Work/Okta) in example.1password.com\n")
+
+      SpecHelper.run(sandbox, ["sites", "set", "mail", "--login", "work", "--steps",
+                               %([{"flow": "okta", "item": "op://Work/Okta", "method": "Example Authenticator"}])]).exit_code.should eq(0)
+      sandbox.read_config.should contain(%(          {"flow": "okta", "item": "op://Work/Okta", "method": "Example Authenticator"}\n))
+      SpecHelper.run(sandbox, ["config", "export", "--json"]).json["sites"]["mail"]["signin"]["work"][0]["method"]
+        .should eq("Example Authenticator")
 
       missing = SpecHelper.run(sandbox, ["sites", "set", "mail", "--remove-login", "school"])
       missing.exit_code.should eq(5)

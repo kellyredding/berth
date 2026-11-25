@@ -16,7 +16,9 @@ final class SigninFiller {
     }
 
     func run(_ request: SigninRequest, siteHost: String?) async -> SigninData {
-        let steps = request.steps.map { SigninRun.Step(flow: $0.flow, hasPassword: $0.password != nil, hasCode: $0.code != nil) }
+        let steps = request.steps.map {
+            SigninRun.Step(flow: $0.flow, hasPassword: $0.password != nil, hasCode: $0.code != nil, method: $0.method)
+        }
         var run = SigninRun(steps: steps, siteHost: siteHost, start: Date())
         var lastIndex = -1
         var lastWaiting: String?
@@ -31,7 +33,7 @@ final class SigninFiller {
                 lastIndex = run.index
                 Log.info("signin: step \(run.index + 1) of \(steps.count), \(flow.rawValue)")
             }
-            let page = await observe(run.currentFlow, in: webView)
+            let page = await observe(run.index < request.steps.count ? request.steps[run.index] : nil, in: webView)
             let decision = run.next(page, now: Date())
             if run.waitingReason != lastWaiting {
                 lastWaiting = run.waitingReason
@@ -53,6 +55,10 @@ final class SigninFiller {
             case .choose:
                 await choose(request.steps[run.index], in: webView)
                 run.choseAccount()
+            case .chooseMethod(let method):
+                if await chooseMethod(method, flow: request.steps[run.index].flow, in: webView) {
+                    run.choseMethod(at: Date())
+                }
             }
             try? await Task.sleep(nanoseconds: Self.poll)
         }
@@ -69,9 +75,11 @@ final class SigninFiller {
         }
     }
 
-    private func observe(_ flow: SigninFlow?, in webView: WKWebView) async -> PageObservation? {
-        guard let flow else { return nil }
-        let result = await call(["op": "observe", "spec": flow.spec.scriptArgument], in: webView)
+    private func observe(_ values: SigninValues?, in webView: WKWebView) async -> PageObservation? {
+        guard let values else { return nil }
+        let result = await call(
+            ["op": "observe", "spec": values.flow.spec.scriptArgument, "method": values.method.map { $0 as Any } ?? NSNull()], in: webView
+        )
         return PageObservation(script: result, loading: webView.isLoading)
     }
 
@@ -93,6 +101,14 @@ final class SigninFiller {
         let matched = filled.map { "\($0.0.rawValue) (\($0.1))" }.joined(separator: ", ")
         Log.info("signin: \(flow.rawValue): filled \(matched); submitted with \(fields["submitted"] as? String ?? "nothing")")
         return filled.map(\.0)
+    }
+
+    /// Whether the method's button was clicked; if not, the next poll looks again.
+    private func chooseMethod(_ method: String, flow: SigninFlow, in webView: WKWebView) async -> Bool {
+        let result = await call(["op": "method", "spec": flow.spec.scriptArgument, "method": method], in: webView) as? [String: Any]
+        let clicked = result?["clicked"] as? String
+        Log.info("signin: \(flow.rawValue): verification method: \(clicked.map { "chose \($0)" } ?? "\(method) not found")")
+        return clicked != nil
     }
 
     private func choose(_ values: SigninValues, in webView: WKWebView) async {

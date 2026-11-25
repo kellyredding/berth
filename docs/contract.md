@@ -129,7 +129,7 @@ registered is unregistered.
         ],
         "work": [
           {"flow": "google", "email_from": "op://Work/Example SSO", "account": "example.1password.com"},
-          {"flow": "okta", "item": "op://Work/Example SSO", "account": "example.1password.com"}
+          {"flow": "okta", "item": "op://Work/Example SSO", "account": "example.1password.com", "method": "Example Authenticator"}
         ]
       }
     }
@@ -182,7 +182,12 @@ bundle identifier (`com.kellyredding.berth.mail`).
   that Google hands off to the next step's single sign-on. A reference names
   a vault and item but not the 1Password account; a step whose item is not in
   `op`'s default account adds `"account"`, the account's sign-in address
-  (`example.1password.com`) or ID, which the CLI passes to `op --account`.
+  (`example.1password.com`) or ID, which the CLI passes to `op --account`. An
+  `okta` step may add `"method"`, the verification method to choose when
+  Okta shows its list of them ("Verify it's you with a security method"):
+  text matched, ignoring case and runs of spaces, as part of a row's text,
+  such as the one the item's one-time code answers. Which methods a list
+  offers depends on the person's Okta, so Berth names none itself.
   `berth signin SITE` uses the only login, and `--account NAME` picks one
   when there are several.
 
@@ -230,18 +235,20 @@ result, writing nothing. Every problem is reported, not just the first.
 - `notifications`, `launch_at_login`: `true` or `false`.
 - `signin`: an object whose keys match `[a-z0-9][a-z0-9-]*`. Each login is a
   non-empty list of steps. A step is an object with `flow` (`google` or
-  `okta`), exactly one of `item` and `email_from`, and optionally `account`;
-  `email_from` goes only with `google`, and a step must follow it. An `item`
-  is `op://VAULT/ITEM`; an `email_from` may add `/FIELD` or
+  `okta`), exactly one of `item` and `email_from`, and optionally `account`
+  and `method`; `email_from` goes only with `google`, and a step must follow
+  it; `method` goes only with `okta`, the only flow with a method list. An
+  `item` is `op://VAULT/ITEM`; an `email_from` may add `/FIELD` or
   `/SECTION/FIELD`; no part is empty. An `account` is letters, digits, dots
   and hyphens, starting and ending with a letter or digit, at most 128
-  characters. The CLI checks the shape only; it never runs `op` to validate.
+  characters. A `method` is a string of 1 to 64 characters, not only
+  spaces. The CLI checks the shape only; it never runs `op` to validate.
 
 ## Config export (`berth config export --json [--site SITE]`)
 
 The normalized config: defaults filled in, `icon` an absolute path, `badge`,
-`mailto` and each step's `item`, `email_from` and `account` present as `null`
-when absent.
+`mailto` and each step's `item`, `email_from`, `account` and `method` present
+as `null` when absent.
 
 ```json
 {
@@ -263,11 +270,11 @@ when absent.
       "launch_at_login": true,
       "signin": {
         "personal": [
-          { "flow": "google", "item": "op://Personal/Example Mail", "email_from": null, "account": null }
+          { "flow": "google", "item": "op://Personal/Example Mail", "email_from": null, "account": null, "method": null }
         ],
         "work": [
-          { "flow": "google", "item": null, "email_from": "op://Work/Example SSO", "account": "example.1password.com" },
-          { "flow": "okta", "item": "op://Work/Example SSO", "email_from": null, "account": "example.1password.com" }
+          { "flow": "google", "item": null, "email_from": "op://Work/Example SSO", "account": "example.1password.com", "method": null },
+          { "flow": "okta", "item": "op://Work/Example SSO", "email_from": null, "account": "example.1password.com", "method": "Example Authenticator" }
         ]
       }
     }
@@ -321,7 +328,7 @@ value.
 | `status` | — | `{"version", "pid", "site", "url": string\|null, "title": string\|null, "badge": string\|null, "config": {"loaded": bool, "state": "loading"\|"loaded"\|"failed", "error": string\|null}}` |
 | `open` | `{"url"?}` | `{"url": string\|null, "opened_in": "app"\|"browser"}` |
 | `reload` | — | `{"loaded": bool, "error": string\|null}`: re-runs the export and applies the site's config |
-| `signin.fill` | `{"login", "steps": [{"flow", "username", "password"?, "code"?}]}` | `{"completed": [flow…], "stopped_at": {"step", "flow", "reason"}\|null, "url": string\|null, "already_signed_in": bool}`, once the sign-in finishes or stops |
+| `signin.fill` | `{"login", "steps": [{"flow", "username", "password"?, "code"?, "method"?}]}` | `{"completed": [flow…], "stopped_at": {"step", "flow", "reason"}\|null, "url": string\|null, "already_signed_in": bool}`, once the sign-in finishes or stops |
 
 - `status`: `url` and `title` are the main window's page now (null before
   one loads), and `badge` its Dock badge (null when there is none).
@@ -339,9 +346,12 @@ value.
   never logs them or writes them to a file, and drops them when the fill
   returns. For a `google` step `username` is the email; an `email_from` step
   sends no `password` or `code`, and a step whose item has no one-time code
-  sends no `code`. `login` (a string or null) is only for the log. A step
-  missing `flow` (`google` or `okta`) or a non-empty `username`, or with an
-  unknown key, is `bad_request`, and the refusal never quotes a value.
+  sends no `code`. `method` is the step's configured `method`, sent only
+  when set; it is not a secret, and the log may name it. `login` (a string
+  or null) is only for the log. A step missing `flow` (`google` or `okta`)
+  or a non-empty `username`, with a `password`, `code` or `method` that is
+  not a non-empty string, or with an unknown key, is `bad_request`, and the
+  refusal never quotes a value.
   - The app brings its window forward and fills the steps in order in the
     main window, polling the page (every 0.4 s) with injected JavaScript in
     an isolated content world. It waits for each step's page and field to
@@ -350,6 +360,15 @@ value.
     (or a button labelled Next, Sign in or Verify, else submits the form).
     A step is done once the page has left its flow (its hosts and marker
     elements) and stayed away 1.5 s.
+  - Okta may show a list of verification methods before the code: more than
+    one visible button labelled Select, each row the largest ancestor of its
+    button holding no other. When the step has a `method` and a row's text
+    holds it (ignoring case and runs of spaces), the app clicks the first
+    such row's button once, then waits for the next page, stopping if the
+    list is still there after 15 s. When no row holds it, or the step has
+    none, it waits for the person to choose ("waiting for you: choose a
+    verification method (the list has no METHOD)" or "(this step names
+    none)"). With no list, the code page is filled as it appears.
   - It replies once the sign-in finishes or stops, within 120 s, since a
     person may have to approve a push. `completed` lists the flows of the
     steps done, in order. `stopped_at` is null on success, else the
@@ -384,7 +403,8 @@ value.
   `item` step, `op read` of `ITEM/username` and `ITEM/password` and `op item
   get ITEM --vault VAULT --otp` (no code when that fails); for an
   `email_from` step, `op read` of `ITEM/username` or the field named; each
-  with `--account` when the step names one. Values come from op's stdout and
+  with `--account` when the step names one. Each step's `method`, when set,
+  goes into the request beside its values. Values come from op's stdout and
   go into the request as bytes, never into argv, output or an error, and are
   zeroed once sent. A declined approval, or no `op`, exits 4; an approval
   still pending (op's "authorization timeout") is retried for up to 60 s; an

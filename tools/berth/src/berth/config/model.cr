@@ -8,6 +8,7 @@ module Berth
     SITE_PATTERN    = /\A[a-z0-9][a-z0-9-]*\z/
     SITE_MAX        = 32
     NAME_MAX        = 64
+    METHOD_MAX      = 64
     BUNDLE_PREFIX   = "com.kellyredding.berth."
     HANDLED_SCHEMES = ["mailto"]
     FLOWS           = ["google", "okta"]
@@ -24,7 +25,9 @@ module Berth
     # One step of a sign-in: a 1Password item signed in with `flow`, or for
     # `google` only, an item whose username is handed to the page as the email.
     # `account` names the 1Password account holding it, when there are several.
-    record Step, flow : String, item : String?, email_from : String?, account : String? = nil
+    # `method`, for `okta` only, is the text of the verification method to
+    # choose when Okta lists them.
+    record Step, flow : String, item : String?, email_from : String?, account : String? = nil, method : String? = nil
 
     record Site,
       id : String,
