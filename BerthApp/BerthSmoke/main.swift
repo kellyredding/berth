@@ -613,10 +613,19 @@ let twoLogins: [String: [SigninStep]] = [
     "personal": [SigninStep(flow: "google", item: "op://Personal/Example Mail", emailFrom: nil)],
 ]
 let mailKeep = KeepList(["mail.example.com", "127.0.0.1"])
+let barStart = Date(timeIntervalSinceReferenceDate: 0)
+func barTime(_ seconds: TimeInterval) -> Date { barStart.addingTimeInterval(seconds) }
+let barSettle = SigninBarState.offerSettle
+/// A page that has stayed for the settle time.
 func barState(_ signin: [String: [SigninStep]] = twoLogins, host: String? = "accounts.google.com") -> SigninBarState {
+    var state = freshBar(signin, host: host)
+    state.recheck(at: barTime(barSettle))
+    return state
+}
+func freshBar(_ signin: [String: [SigninStep]] = twoLogins, host: String? = "accounts.google.com") -> SigninBarState {
     var state = SigninBarState()
-    state.configure(name: "Mail", signin: signin, keep: mailKeep)
-    state.pageChanged(host: host)
+    state.configure(name: "Mail", signin: signin, keep: mailKeep, at: barStart)
+    state.pageChanged(host: host, at: barStart)
     return state
 }
 
@@ -635,21 +644,64 @@ check("bar: the site itself shows none", barState(host: "mail.example.com").disp
       && barState(host: "mail.example.com").onSite)
 var marked = barState(host: "127.0.0.1")
 check("bar: a page on another host is not a sign-in page by its host", marked.display == .hidden)
-marked.markers(seen: true)
-check("bar: but is by a flow's markers", marked.display == .offer && !marked.onSite)
-marked.pageChanged(host: "127.0.0.1")
+marked.markers(seen: true, at: barTime(2))
+check("bar: but is by a flow's markers, once they have stayed", marked.display == .hidden && marked.offerDue == barTime(2 + barSettle))
+marked.recheck(at: barTime(2 + barSettle))
+check("bar: then it offers", marked.display == .offer && !marked.onSite)
+marked.pageChanged(host: "127.0.0.1", at: barTime(4))
 check("bar: the same host keeps its markers until they are looked for again", marked.display == .offer)
-marked.pageChanged(host: "mail.example.com")
+marked.pageChanged(host: "mail.example.com", at: barTime(5))
 check("bar: a new host forgets them", marked.display == .hidden && !marked.markerSeen)
 
 var dismissedBar = barState()
 dismissedBar.dismiss()
-check("bar: × hides it", dismissedBar.display == .hidden)
-dismissedBar.pageChanged(host: "example.okta.com")
+check("bar: × hides it", dismissedBar.display == .hidden && dismissedBar.offerDue == nil)
+dismissedBar.pageChanged(host: "example.okta.com", at: barTime(2))
+dismissedBar.recheck(at: barTime(2 + barSettle))
 check("bar: and it stays hidden across sign-in pages", dismissedBar.display == .hidden)
-dismissedBar.pageChanged(host: "mail.example.com")
-dismissedBar.pageChanged(host: "accounts.google.com")
+dismissedBar.pageChanged(host: "mail.example.com", at: barTime(4))
+dismissedBar.pageChanged(host: "accounts.google.com", at: barTime(5))
+dismissedBar.recheck(at: barTime(5 + barSettle))
 check("bar: until the page leaves them and comes back", dismissedBar.display == .offer)
+
+var passThrough = freshBar()
+check("bar: a sign-in page offers nothing at first", passThrough.display == .hidden && passThrough.presentation == nil
+      && passThrough.offerDue == barTime(barSettle))
+passThrough.pageChanged(host: "mail.example.com", at: barTime(0.4))
+check("bar: a pass-through to the site never offers", passThrough.display == .hidden && passThrough.offerDue == nil)
+passThrough.recheck(at: barTime(barSettle))
+check("bar: not even when its check comes due", passThrough.display == .hidden && passThrough.presentation == nil)
+
+var staying = freshBar()
+staying.recheck(at: barTime(barSettle - 0.1))
+check("bar: a sign-in page that stays offers nothing before the settle time",
+      staying.display == .hidden && staying.offerDue == barTime(barSettle))
+staying.pageChanged(host: "example.okta.com", at: barTime(1))
+check("bar: moving between sign-in pages keeps the clock", staying.offerDue == barTime(barSettle))
+staying.recheck(at: barTime(barSettle))
+check("bar: and offers once it has stayed", staying.display == .offer && staying.offerDue == nil
+      && staying.presentation?.message == "Signed out of Mail.")
+
+var returning = freshBar()
+returning.pageChanged(host: "mail.example.com", at: barTime(1))
+returning.pageChanged(host: "accounts.google.com", at: barTime(1.2))
+returning.recheck(at: barTime(barSettle))
+check("bar: leaving and coming back restarts the clock",
+      returning.display == .hidden && returning.offerDue == barTime(1.2 + barSettle))
+returning.recheck(at: barTime(1.2 + barSettle))
+check("bar: which then runs its full settle time", returning.display == .offer)
+
+var startedEarly = freshBar()
+startedEarly.launched(login: "work")
+check("bar: a sign-in started on an unsettled page waits for 1Password at once", startedEarly.display == .waitingFor1Password)
+startedEarly.fillStarted(flows: ["google"])
+check("bar: and shows its progress at once", startedEarly.presentation?.message == "Signing in: google (1 of 1)…")
+startedEarly.fillFinished(.stopped(reason: "r"))
+check("bar: and its result", startedEarly.display == .result(.stopped(reason: "r")))
+var failedEarly = freshBar()
+failedEarly.launched(login: "work")
+failedEarly.cliFinished(.failed("Sign-in failed: x"))
+check("bar: an error shows at once", failedEarly.presentation?.message == "Sign-in failed: x")
 
 var fromApp = barState()
 fromApp.launched(login: "work")
@@ -667,7 +719,7 @@ fromApp.fillFinished(.signedIn(already: false))
 check("bar: signed in", fromApp.presentation?.message == "Signed in to Mail." && fromApp.presentation?.tone == .success
       && fromApp.isRunning)
 fromApp.cliFinished(.signedIn(already: false))
-fromApp.pageChanged(host: "mail.example.com")
+fromApp.pageChanged(host: "mail.example.com", at: barTime(2))
 check("bar: still says so on the site, briefly", fromApp.display == .result(.signedIn(already: false)) && fromApp.menuEnabled)
 fromApp.expireSuccess()
 check("bar: then hides", fromApp.display == .hidden)
@@ -691,9 +743,9 @@ check("bar: a stop stays, offering to try again",
       stopped.presentation == .init(symbol: "exclamationmark.triangle.fill", tone: .warning,
                                     message: "Sign-in stopped: the page didn't accept the password on the okta password step",
                                     button: "Try Again", spinning: false, dismissible: true))
-stopped.pageChanged(host: "example.okta.com")
+stopped.pageChanged(host: "example.okta.com", at: barTime(2))
 check("bar: across sign-in pages", stopped.display == .result(.stopped(reason: "the page didn't accept the password on the okta password step")))
-stopped.pageChanged(host: "mail.example.com")
+stopped.pageChanged(host: "mail.example.com", at: barTime(3))
 check("bar: until the page reaches the site", stopped.display == .hidden)
 
 var declined = barState(host: "mail.example.com")
@@ -701,7 +753,7 @@ declined.launched(login: "personal")
 declined.cliFinished(.failed("1Password didn't approve, or isn't available."))
 check("bar: a CLI error shows even on the site", declined.presentation?.message == "1Password didn't approve, or isn't available."
       && declined.presentation?.button == "Try Again")
-declined.pageChanged(host: "mail.example.com")
+declined.pageChanged(host: "mail.example.com", at: barTime(2))
 check("bar: and stays until dismissed", declined.display == .result(.failed("1Password didn't approve, or isn't available.")))
 declined.dismiss()
 check("bar: × clears it", declined.display == .hidden)

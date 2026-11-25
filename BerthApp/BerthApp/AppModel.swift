@@ -23,12 +23,15 @@ final class AppModel: ObservableObject {
     private var badgeRule: BadgeRule?
     private var loggedFirstPage = false
     private var successExpiry = 0
+    private var offerCheckDue: Date?
+    private var offerChecks = 0
     @Published private(set) var badge: String?
     /// File → Sign In with 1Password and the main window's sign-in bar.
     @Published private(set) var signinBar = SigninBarState() {
         didSet {
             let message = signinBar.presentation?.message
             if message != oldValue.presentation?.message { Log.info("signin bar: \(message ?? "hidden")") }
+            scheduleOfferCheck()
         }
     }
 
@@ -115,7 +118,7 @@ final class AppModel: ObservableObject {
         }
         updateBadge(title: mainWindow?.webView.title)
         LaunchAtLoginChoice.apply(configured: config.launchAtLogin, site: site)
-        signinBar.configure(name: config.name, signin: config.signin, keep: config.keep)
+        signinBar.configure(name: config.name, signin: config.signin, keep: config.keep, at: Date())
 
         if mainWindow == nil { createMainWindow(config) }
     }
@@ -191,7 +194,7 @@ final class AppModel: ObservableObject {
     /// The main window's page moved, by a load, a redirect or the page's own
     /// history.
     func mainPageChanged(_ url: URL?) {
-        signinBar.pageChanged(host: url.flatMap { LinkPolicy.isWeb($0) ? $0.host : nil })
+        signinBar.pageChanged(host: url.flatMap { LinkPolicy.isWeb($0) ? $0.host : nil }, at: Date())
     }
 
     func mainPageFinished(_ url: URL?) {
@@ -344,7 +347,25 @@ final class AppModel: ObservableObject {
     /// Whether the main window's page shows a sign-in flow's markers.
     func signinMarkers(seen: Bool) {
         guard seen != signinBar.markerSeen else { return }
-        signinBar.markers(seen: seen)
+        signinBar.markers(seen: seen, at: Date())
+    }
+
+    /// One check when a sign-in page's offer falls due. A page that moves on
+    /// first changes or clears the due time, and the stale check is ignored.
+    private func scheduleOfferCheck() {
+        let due = signinBar.offerDue
+        guard due != offerCheckDue else { return }
+        offerCheckDue = due
+        offerChecks += 1
+        guard let due else { return }
+        let token = offerChecks
+        DispatchQueue.main.asyncAfter(deadline: .now() + max(0, due.timeIntervalSinceNow)) { [weak self] in
+            MainActor.assumeIsolated {
+                guard let self, self.offerChecks == token else { return }
+                self.offerCheckDue = nil
+                self.signinBar.recheck(at: Date())
+            }
+        }
     }
 
     private func signinFinished(_ result: SigninResult, login: String) {

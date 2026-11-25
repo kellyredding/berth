@@ -105,11 +105,11 @@ enum SigninMenuShape: Equatable {
 
 /// The sign-in bar's state: the site's logins, the page, and any sign-in
 /// running or just ended. Every event is a mutation; `display` and
-/// `presentation` say what shows.
+/// `presentation` say what shows as of the latest time the state was told.
 struct SigninBarState: Equatable {
     enum Display: Equatable {
         case hidden
-        /// A sign-in page, nothing running: offer to sign in.
+        /// A sign-in page that has stayed, nothing running: offer to sign in.
         case offer
         /// The app ran the CLI, and no fill has arrived yet.
         case waitingFor1Password
@@ -133,6 +133,10 @@ struct SigninBarState: Equatable {
 
     /// How long "Signed in" stays before the bar hides.
     static let successDuration: TimeInterval = 2
+    /// How long the main frame must stay on the sign-in pages before the bar
+    /// offers to sign in: a start URL that passes through the identity
+    /// provider to a signed-in user must not flash it. The filler's settle.
+    static let offerSettle: TimeInterval = 1.5
 
     private(set) var name = ""
     /// Sorted, since the export's object order is not kept.
@@ -150,6 +154,9 @@ struct SigninBarState: Equatable {
     private(set) var progress: SigninProgress?
     private(set) var result: SigninResult?
     private(set) var dismissed = false
+    /// When the page last came onto the sign-in pages, while it stays on them.
+    private(set) var signinPageSince: Date?
+    private(set) var now = Date.distantPast
 
     init() {}
 
@@ -167,11 +174,22 @@ struct SigninBarState: Equatable {
     /// The site itself: a kept host that is not a sign-in page.
     var onSite: Bool { !onSigninPage && keep.keeps(host: host) }
 
+    /// When the offer is due, while the page has not yet stayed long enough;
+    /// the app re-checks then.
+    var offerDue: Date? {
+        guard let since = signinPageSince, !dismissed, !signinPageStayed else { return nil }
+        return since.addingTimeInterval(Self.offerSettle)
+    }
+
+    private var signinPageStayed: Bool {
+        signinPageSince.map { now >= $0.addingTimeInterval(Self.offerSettle) } ?? false
+    }
+
     var display: Display {
         if filling, let progress { return .progress(progress) }
         if let result { return .result(result) }
         if launching != nil { return .waitingFor1Password }
-        if onSigninPage && !dismissed { return .offer }
+        if onSigninPage && signinPageStayed && !dismissed { return .offer }
         return .hidden
     }
 
@@ -207,7 +225,7 @@ struct SigninBarState: Equatable {
 
     // MARK: - Events
 
-    mutating func configure(name: String, signin: [String: [SigninStep]], keep: KeepList) {
+    mutating func configure(name: String, signin: [String: [SigninStep]], keep: KeepList, at now: Date) {
         let before = onSite
         self.name = name
         logins = signin.keys.sorted()
@@ -217,22 +235,27 @@ struct SigninBarState: Equatable {
         }
         flows = used
         self.keep = keep
-        settle(wasOnSite: before)
+        settle(wasOnSite: before, at: now)
     }
 
     /// The main frame's page changed. A new host forgets the last page's
     /// markers until they are looked for again.
-    mutating func pageChanged(host newHost: String?) {
+    mutating func pageChanged(host newHost: String?, at now: Date) {
         let before = onSite
         if newHost?.lowercased() != host?.lowercased() { markerSeen = false }
         host = newHost
-        settle(wasOnSite: before)
+        settle(wasOnSite: before, at: now)
     }
 
-    mutating func markers(seen: Bool) {
+    mutating func markers(seen: Bool, at now: Date) {
         let before = onSite
         markerSeen = seen
-        settle(wasOnSite: before)
+        settle(wasOnSite: before, at: now)
+    }
+
+    /// Time has passed with no event: the app's check when the offer is due.
+    mutating func recheck(at now: Date) {
+        self.now = now
     }
 
     /// The app ran `berth signin` for this login.
@@ -282,8 +305,14 @@ struct SigninBarState: Equatable {
         result = nil
     }
 
-    private mutating func settle(wasOnSite: Bool) {
-        if !onSigninPage { dismissed = false }
+    private mutating func settle(wasOnSite: Bool, at now: Date) {
+        self.now = now
+        if onSigninPage {
+            if signinPageSince == nil { signinPageSince = now }
+        } else {
+            signinPageSince = nil
+            dismissed = false
+        }
         // Reaching the site means the person finished: a stop or failure no
         // longer applies.
         if onSite && !wasOnSite && !isRunning, let result, !result.succeeded {
