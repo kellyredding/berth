@@ -9,6 +9,26 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuItemValidation {
     private var appName = "Berth"
     private var termination: DispatchSourceSignal?
 
+    /// Every URL handed to the app arrives as a get-URL Apple event: a link
+    /// in a scheme the app claims (`mailto:`), and `open -a <app> URL`.
+    /// Installed before launch finishes, so the event that launched the app
+    /// reaches it too.
+    func applicationWillFinishLaunching(_ notification: Notification) {
+        NSAppleEventManager.shared().setEventHandler(
+            self, andSelector: #selector(handleGetURL(_:withReplyEvent:)),
+            forEventClass: AEEventClass(kInternetEventClass), andEventID: AEEventID(kAEGetURL)
+        )
+    }
+
+    @objc func handleGetURL(_ event: NSAppleEventDescriptor, withReplyEvent reply: NSAppleEventDescriptor) {
+        guard let text = event.paramDescriptor(forKeyword: AEKeyword(keyDirectObject))?.stringValue,
+              let url = URL(string: text) else {
+            Log.info("ignored a URL event without a URL")
+            return
+        }
+        application(NSApp, open: [url])
+    }
+
     func applicationDidFinishLaunching(_ notification: Notification) {
         NSApp.setActivationPolicy(.regular)
         // SIGTERM (`kill <pid>`) quits like ⌘Q, so the socket is taken down.

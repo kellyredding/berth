@@ -878,6 +878,56 @@ check("System Settings opens at this app's notifications",
       NotificationSettingsLink.url(bundleID: "com.kellyredding.berth.mail")?.absoluteString
         == "x-apple.systempreferences:com.apple.Notifications-Settings.extension?id=com.kellyredding.berth.mail")
 
+// MARK: - mailto
+
+let composeTemplate = "https://mail.example.com/mail/?extsrc=mailto&url=%s"
+func compose(_ link: String) -> String? { MailtoLink.composeURL(template: composeTemplate, link: link)?.absoluteString }
+
+check("mailto: the whole link goes where %s was, encoded",
+      compose("mailto:someone@example.com") == "https://mail.example.com/mail/?extsrc=mailto&url=mailto%3Asomeone%40example.com")
+check("mailto: a subject's escapes are encoded again, so the site reads them as they were",
+      compose("mailto:someone@example.com?subject=Hi%20there")
+        == "https://mail.example.com/mail/?extsrc=mailto&url=mailto%3Asomeone%40example.com%3Fsubject%3DHi%2520there")
+check("mailto: a body's line breaks survive",
+      compose("mailto:someone@example.com?body=one%0D%0Atwo")
+        == "https://mail.example.com/mail/?extsrc=mailto&url=mailto%3Asomeone%40example.com%3Fbody%3Done%250D%250Atwo")
+check("mailto: several recipients keep their commas",
+      compose("mailto:a@example.com,b@example.com?cc=c@example.com")
+        == "https://mail.example.com/mail/?extsrc=mailto&url=mailto%3Aa%40example.com%2Cb%40example.com%3Fcc%3Dc%40example.com")
+check("mailto: a + in an address is not a space",
+      compose("mailto:someone+news@example.com") == "https://mail.example.com/mail/?extsrc=mailto&url=mailto%3Asomeone%2Bnews%40example.com")
+check("mailto: an & between fields cannot end the template's query",
+      compose("mailto:someone@example.com?subject=a&body=b")
+        == "https://mail.example.com/mail/?extsrc=mailto&url=mailto%3Asomeone%40example.com%3Fsubject%3Da%26body%3Db")
+check("mailto: an encoded & in a subject stays part of it",
+      compose("mailto:someone@example.com?subject=Tom%20%26%20Jerry")
+        == "https://mail.example.com/mail/?extsrc=mailto&url=mailto%3Asomeone%40example.com%3Fsubject%3DTom%2520%2526%2520Jerry")
+check("mailto: the encoded link decodes back to itself", {
+    let link = "mailto:a+b@example.com,c@example.com?subject=Hi%20%26%20bye&body=x"
+    let query = URLComponents(string: compose(link) ?? "")?.queryItems
+    return query?.first { $0.name == "url" }?.value == link
+}())
+check("mailto: %s in a fragment works too", MailtoLink.composeURL(template: "https://mail.example.com/#compose/%s", link: "mailto:someone@example.com")?
+      .absoluteString == "https://mail.example.com/#compose/mailto%3Asomeone%40example.com")
+check("mailto: a template without %s, or with two, makes nothing",
+      MailtoLink.composeURL(template: "https://mail.example.com/compose", link: "mailto:a@example.com") == nil
+        && MailtoLink.composeURL(template: "https://mail.example.com/%s/%s", link: "mailto:a@example.com") == nil)
+check("mailto: a template that is not a web URL makes nothing",
+      MailtoLink.composeURL(template: "file:///tmp/%s", link: "mailto:a@example.com") == nil)
+check("mailto: a site that handles it composes",
+      MailtoLink.route("mailto:a@example.com", handles: ["mailto"], template: "https://mail.example.com/compose?to=%s")
+        == .compose(url("https://mail.example.com/compose?to=mailto%3Aa%40example.com")))
+check("mailto: a site that doesn't is not handled",
+      MailtoLink.route("mailto:a@example.com", handles: [], template: "https://mail.example.com/compose?to=%s") == .notHandled
+        && MailtoLink.route("mailto:a@example.com", handles: ["mailto"], template: nil) == .notHandled)
+check("mailto: a bad template says so", MailtoLink.route("mailto:a@example.com", handles: ["mailto"], template: "https://x.example.com/") == .badTemplate)
+check("mailto: is a mailto link, whatever its case",
+      MailtoLink.isMailto(url("mailto:a@example.com")) && MailtoLink.isMailto(url("MAILTO:a@example.com"))
+        && !MailtoLink.isMailto(url("https://mail.example.com/")))
+check("mailto: the fixture's template composes",
+      fixture?.sites["mail"].flatMap { MailtoLink.route("mailto:a@example.com", handles: $0.handles, template: $0.mailto) }
+        == .compose(url("https://mail.example.com/compose?to=mailto%3Aa%40example.com")))
+
 // MARK: - Small rules
 
 check("no build commit is a development build", BuildLabel.text(commit: nil) == "development build")

@@ -1,7 +1,8 @@
 import AppKit
 import SwiftUI
 
-/// Settings: Launch at Login, notifications, and what this app is.
+/// Settings: Launch at Login, notifications, the default email app, and what
+/// this app is.
 @MainActor
 final class SettingsWindowController: NSWindowController {
     private static var shared: SettingsWindowController?
@@ -33,6 +34,8 @@ struct SettingsView: View {
     @ObservedObject var model: AppModel
     @State private var launchAtLogin = LaunchAtLogin.isEnabled
     @State private var requiresApproval = LaunchAtLogin.requiresApproval
+    @State private var mailApp = DefaultMailApp.current
+    @State private var mailError: String?
 
     var body: some View {
         Form {
@@ -53,6 +56,9 @@ struct SettingsView: View {
             if model.configStore.config?.notifications == true {
                 notificationsSection
             }
+            if model.configStore.config?.handles.contains("mailto") == true {
+                mailSection
+            }
             Section {
                 LabeledContent("Site", value: model.site)
                 LabeledContent("Name", value: model.displayName)
@@ -72,6 +78,30 @@ struct SettingsView: View {
             launchAtLogin = LaunchAtLogin.isEnabled
             requiresApproval = LaunchAtLogin.requiresApproval
             model.notifier.refreshAuthorization()
+            mailApp = DefaultMailApp.current
+        }
+        .onReceive(NotificationCenter.default.publisher(for: NSApplication.didBecomeActiveNotification)) { _ in
+            mailApp = DefaultMailApp.current
+        }
+    }
+
+    private var mailSection: some View {
+        Section {
+            Text("Default email app: \(mailApp.name ?? "none")")
+            if !mailApp.isThisApp {
+                Button("Make \(model.displayName) the default email app") {
+                    mailError = nil
+                    DefaultMailApp.makeThisApp { error in
+                        mailError = error.map { "Not changed: \($0.localizedDescription)" }
+                        mailApp = DefaultMailApp.current
+                    }
+                }
+            }
+            if let mailError {
+                Text(mailError)
+                    .font(.caption)
+                    .foregroundStyle(.orange)
+            }
         }
     }
 

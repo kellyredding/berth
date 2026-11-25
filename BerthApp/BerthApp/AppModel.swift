@@ -148,7 +148,8 @@ final class AppModel: ObservableObject {
         let pending = pendingURLs
         pendingURLs = []
         var start = config.url
-        for url in pending {
+        for incoming in pending {
+            guard let url = MailtoLink.isMailto(incoming) ? composeURL(for: incoming, config: config) : incoming else { continue }
             switch LinkPolicy.external(url, keep: config.keep) {
             case .app: start = url
             case .browser: openExternally(url)
@@ -227,13 +228,36 @@ final class AppModel: ObservableObject {
         }
     }
 
-    /// URLs from `open -a <app> URL`, before or after the page is up.
+    /// URLs from `open -a <app> URL` and `mailto:` links, before or after the
+    /// page is up.
     func openURLs(_ urls: [URL]) {
-        guard mainWindow != nil else {
+        guard mainWindow != nil, let config = configStore.config else {
             pendingURLs.append(contentsOf: urls)
             return
         }
-        for url in urls { _ = open(url) }
+        for url in urls {
+            if MailtoLink.isMailto(url) {
+                if let compose = composeURL(for: url, config: config) { _ = open(compose) }
+            } else {
+                _ = open(url)
+            }
+        }
+    }
+
+    /// A `mailto:` link as the site's compose page, which then loads in the
+    /// main window like any kept URL. Never handed back to the system: this
+    /// app may be the default email app, and the link would return here.
+    private func composeURL(for link: URL, config: SiteConfig) -> URL? {
+        switch MailtoLink.route(link.absoluteString, handles: config.handles, template: config.mailto) {
+        case .compose(let url):
+            Log.info("mailto: opening the compose page \(LinkPolicy.hostAndPath(url))")
+            return url
+        case .notHandled:
+            Log.info("mailto: dropped a link; this site's config doesn't handle mailto")
+        case .badTemplate:
+            Log.error("mailto: dropped a link; the site's mailto template doesn't make a URL with it")
+        }
+        return nil
     }
 
     private func activate() {

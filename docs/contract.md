@@ -174,7 +174,7 @@ bundle identifier (`com.kellyredding.berth.mail`).
 | `icon` | no | none (the template's icon) | A PNG file |
 | `badge.title` | no | no badge | A regular expression whose one capture group, matched against the page title, is the Dock badge |
 | `handles` | no | `[]` | URL schemes the app handles: `mailto` |
-| `mailto` | when `handles` has `mailto` | none | The URL a `mailto:` link opens, with `%s` where the link goes |
+| `mailto` | when `handles` has `mailto` | none | The URL a `mailto:` link opens, with `%s` where the link goes ("`mailto:` links") |
 | `notifications` | no | `false` | Whether the page's web notifications become macOS notifications ("Notifications") |
 | `launch_at_login` | no | `false` | Whether the app opens at login |
 | `signin` | no | `{}` | Named logins, each the ordered steps of one sign-in |
@@ -409,8 +409,8 @@ value.
   - Selectors and the step model live in
     `BerthApp/BerthApp/Models/SigninFlows.swift`, the script in
     `SigninScript.swift` beside it.
-- An app given a URL at launch (`open -a <app> URL`) treats it as `open`
-  does.
+- An app given a URL at launch or later (`open -a <app> URL`) treats it as
+  `open` does, except a `mailto:` link ("`mailto:` links").
 
 ### What the CLI does with them
 
@@ -510,6 +510,33 @@ view has no `window.Notification`, so a site app whose site sets
   is asked (turning it on asks), on once allowed, and off with a link to
   System Settings › Notifications for this app once refused. Only System
   Settings changes an answer macOS has given.
+
+## `mailto:` links (`handles`, `mailto`)
+
+`berth sites build` registers the schemes in `handles` through
+`CFBundleURLTypes` ("Site apps"); the app does the rest.
+
+- **A link arrives** as a get-URL Apple event (`kAEGetURL`), whichever app
+  sent it, `open -a <app> URL` included. When the site's `handles` has
+  `mailto`, the app replaces the `%s` in the site's `mailto` with the whole
+  link percent-encoded (everything but RFC 3986's unreserved characters, so
+  `+`, `&`, `,`, `@` and an existing `%20` are encoded too), as a browser's
+  registered protocol handler does; the site decodes it once and reads the
+  link exactly as it was sent. The compose URL then goes where `open` sends
+  a URL: into the main window, which comes forward, when `keep` matches its
+  host, else the default browser. A link arriving before the page is up
+  waits for it. The rules live in `BerthApp/BerthApp/Models/MailtoLink.swift`.
+- **The main window, not a new one:** the compose page is the site itself,
+  and a second window would load and keep a second copy of it.
+- **A site that does not handle `mailto`** (its config changed since the app
+  was built) drops the link; it never hands it back to the system, which
+  could send it straight back to this app.
+- **The log** names the compose page's host and path, never the link, its
+  address, subject or body.
+- **Settings**, for a site that handles `mailto`, shows "Default email app:
+  NAME" (macOS's current choice) and, unless it is this app, a button "Make
+  NAME the default email app", which asks macOS to make this app the
+  default; macOS asks the person to confirm.
 
 ## CLI exit codes
 
