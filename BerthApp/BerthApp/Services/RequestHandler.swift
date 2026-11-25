@@ -32,8 +32,11 @@ final class RequestHandler: @unchecked Sendable {
         case .reload:
             return Reply.ok(await model.configStore.reload())
 
-        case .signinFill:
-            return Reply.failure(.signinNotImplemented)
+        case .signinFill(let signin):
+            switch await model.signin(signin) {
+            case .success(let data): return Reply.ok(data)
+            case .failure(let error): return Reply.failure(error)
+            }
         }
     }
 }

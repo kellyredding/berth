@@ -13,16 +13,23 @@ ICON_SET       := BerthApp/Assets.xcassets/AppIcon.appiconset
 XCODEBUILD     = xcodebuild -project BerthApp.xcodeproj -derivedDataPath $(DERIVED_DATA) \
                    MARKETING_VERSION=$(VERSION)
 
-.PHONY: all generate build smoke check release clean icon
+.PHONY: all generate validate-js build smoke check release clean icon
 
 all: build
 
 generate:
 	xcodegen generate
 
+# JavaScript embedded in Swift literals marked `// js-validate` is opaque to
+# xcodebuild, so a syntax error would compile clean and fail only in the page.
+# Without node the build stops here rather than skipping the check.
+validate-js:
+	@command -v node >/dev/null || { echo "validate-js: node is not installed, and it checks the JavaScript embedded in the app; install it (brew install node) and build again" >&2; exit 1; }
+	node scripts/validate-js.mjs
+
 # Builds unregister their own product, which Xcode registers with Launch
 # Services, so a development build never shadows an installed site app.
-build: generate
+build: generate validate-js
 	$(XCODEBUILD) -scheme $(SCHEME) -configuration $(CONFIG_DEBUG) build
 	@$(LSREGISTER) -u "$(CURDIR)/$(DERIVED_DATA)/Build/Products/$(CONFIG_DEBUG)/$(APP_NAME).app" 2>/dev/null || true
 
@@ -36,7 +43,7 @@ check: build smoke
 
 # The template `berth sites build --template` takes in development:
 # build/Build/Products/Release/Berth.app.
-release: generate
+release: generate validate-js
 	$(XCODEBUILD) -scheme $(SCHEME) -configuration $(CONFIG_RELEASE) build
 	@$(LSREGISTER) -u "$(CURDIR)/$(DERIVED_DATA)/Build/Products/$(CONFIG_RELEASE)/$(APP_NAME).app" 2>/dev/null || true
 

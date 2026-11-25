@@ -49,6 +49,10 @@ make app-check   # app: build + smoke (BerthApp/Makefile's check)
   matching, badge parsing, the user agent and the sign-in steps are checked
   without a window server. Anything needing AppKit or WebKit belongs in
   `Services/` or `Views/`.
+- **JavaScript embedded in Swift** goes in a `"""` literal with `// js-validate`
+  on the line above it. The app's build runs `BerthApp/scripts/validate-js.mjs`
+  (it needs `node`) before xcodebuild, because a syntax error in a literal
+  compiles clean and fails only in the page. Write a JS backslash as `\\`.
 - `fixtures/config.json` and `fixtures/export.json` pin the config export for
   both sides. Never edit them to make one side's check pass.
 - The build is the template, `Berth.app`, which shows no site. A development

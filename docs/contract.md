@@ -319,7 +319,7 @@ value.
 | `status` | — | `{"version", "pid", "site", "url": string\|null, "title": string\|null, "badge": string\|null, "config": {"loaded": bool, "state": "loading"\|"loaded"\|"failed", "error": string\|null}}` |
 | `open` | `{"url"?}` | `{"url": string\|null, "opened_in": "app"\|"browser"}` |
 | `reload` | — | `{"loaded": bool, "error": string\|null}`: re-runs the export and applies the site's config |
-| `signin.fill` | `{"login", "steps": [{"flow", "username", "password"?, "code"?}]}` | `{"accepted": true}`: fills each step as its page appears |
+| `signin.fill` | `{"login", "steps": [{"flow", "username", "password"?, "code"?}]}` | `{"completed": [flow…], "stopped_at": {"step", "flow", "reason"}\|null, "url": string\|null, "already_signed_in": bool}`, once the sign-in finishes or stops |
 
 - `status`: `url` and `title` are the main window's page now (null before
   one loads), and `badge` its Dock badge (null when there is none).
@@ -333,13 +333,36 @@ value.
 - `reload` is `"ok": true` with `"loaded": false` and the error when the
   export fails: the request worked, the config did not. What a running app
   cannot change in place (name, icon, URL schemes) needs `berth sites build`.
-- `signin.fill` is not implemented yet: the app replies `unavailable`,
-  "signin.fill is not implemented yet". When it is, it carries secrets. They
-  travel only over this socket; the app never logs them or writes them to a
-  file, and forgets them once filled or abandoned. For a `google` step
-  `username` is the email; an `email_from` step sends no `password` or
-  `code`. When a step's page never appears, the app says which step it
-  stopped at and the user finishes by hand.
+- `signin.fill` carries secrets. They travel only over this socket; the app
+  never logs them or writes them to a file, and drops them when the fill
+  returns. For a `google` step `username` is the email; an `email_from` step
+  sends no `password` or `code`, and a step whose item has no one-time code
+  sends no `code`. `login` (a string or null) is only for the log. A step
+  missing `flow` (`google` or `okta`) or a non-empty `username`, or with an
+  unknown key, is `bad_request`, and the refusal never quotes a value.
+  - The app brings its window forward and fills the steps in order in the
+    main window, polling the page (every 0.4 s) with injected JavaScript in
+    an isolated content world. It waits for each step's page and field to
+    appear, sets each value through the input's native value setter,
+    dispatches `input` and `change`, then clicks the step's submit button
+    (or a button labelled Next, Sign in or Verify, else submits the form).
+    A step is done once the page has left its flow (its hosts and marker
+    elements) and stayed away 1.5 s.
+  - It replies once the sign-in finishes or stops, within 120 s, since a
+    person may have to approve a push. `completed` lists the flows of the
+    steps done, in order. `stopped_at` is null on success, else the
+    zero-based `step`, its `flow` and a `reason` such as "waiting for you:
+    approve the Okta sign-in" or "the page didn't accept the password on the
+    okta password step"; the person finishes by hand. `url` is the page's
+    scheme, host and path, never its query. `already_signed_in` is true when
+    the page was the site itself, not a sign-in page: there was nothing to
+    do. Steps that are neither completed nor stopped at were not needed:
+    the page reached the site first.
+  - One fill at a time: another `signin.fill` meanwhile is `unavailable`,
+    as is one before a config has loaded.
+  - Selectors and the step model live in
+    `BerthApp/BerthApp/Models/SigninFlows.swift`, the script in
+    `SigninScript.swift` beside it.
 - An app given a URL at launch (`open -a <app> URL`) treats it as `open`
   does.
 

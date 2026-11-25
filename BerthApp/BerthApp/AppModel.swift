@@ -22,6 +22,7 @@ final class AppModel: ObservableObject {
     private var pendingURLs: [URL] = []
     private var badgeRule: BadgeRule?
     private var loggedFirstPage = false
+    private var signingIn = false
     @Published private(set) var badge: String?
 
     init(paths: BerthPaths, site: String) {
@@ -254,5 +255,25 @@ final class AppModel: ObservableObject {
         case .ignore:
             return .failure(.badRequest("\(url.absoluteString) cannot be opened"))
         }
+    }
+
+    /// Fills the main window's sign-in, one at a time, in front of the person
+    /// who may have to approve a step.
+    func signin(_ request: SigninRequest) async -> Result<SigninData, RequestError> {
+        guard let mainWindow, let config = configStore.config else { return .failure(.noConfig) }
+        guard !signingIn else { return .failure(.signinBusy) }
+        signingIn = true
+        defer { signingIn = false }
+        showMainWindow()
+        Log.info("signin: filling \(request)")
+        let data = await SigninFiller(webView: mainWindow.webView).run(request, siteHost: config.url.host)
+        if data.alreadySignedIn {
+            Log.info("signin: signed in already; nothing to do")
+        } else if let stop = data.stoppedAt {
+            Log.info("signin: stopped at step \(stop.step + 1), \(stop.flow): \(stop.reason)")
+        } else {
+            Log.info("signin: done (\(data.completed.joined(separator: ", ")))")
+        }
+        return .success(data)
     }
 }

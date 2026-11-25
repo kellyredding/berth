@@ -63,8 +63,8 @@ struct RequestError: Error, Equatable {
 
     static let noConfig = RequestError(code: .unavailable, message: "no config is loaded")
 
-    static let signinNotImplemented = RequestError(
-        code: .unavailable, message: "signin.fill is not implemented yet"
+    static let signinBusy = RequestError(
+        code: .unavailable, message: "a sign-in is already being filled in this app"
     )
 }
 
@@ -88,7 +88,7 @@ enum BerthRequest: Equatable {
     case status
     case open(URL?)
     case reload
-    case signinFill
+    case signinFill(SigninRequest)
 
     static func parse(_ line: Data) -> Result<BerthRequest, RequestError> {
         let envelope: RequestEnvelope
@@ -104,7 +104,7 @@ enum BerthRequest: Equatable {
         switch envelope.event {
         case "status": return .success(.status)
         case "reload": return .success(.reload)
-        case "signin.fill": return .success(.signinFill)
+        case "signin.fill": return SigninRequest.parse(detail).map(BerthRequest.signinFill)
         case "open": return parseOpen(detail)
         default: return .failure(.badRequest("unknown event \"\(envelope.event)\""))
         }

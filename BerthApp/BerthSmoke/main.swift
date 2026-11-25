@@ -300,8 +300,13 @@ check("open with a url parses",
         == .success(.open(url("https://mail.example.com/#inbox"))))
 check("open refuses a non-web url", parsedCode(#"{"v":1,"event":"open","ts":1,"detail_data":{"url":"mailto:a@example.com"}}"#) == .badRequest)
 check("open refuses a url that is not a string", parsedCode(#"{"v":1,"event":"open","ts":1,"detail_data":{"url":3}}"#) == .badRequest)
-check("signin.fill parses without reading its detail",
-      parsed(#"{"v":1,"event":"signin.fill","ts":1,"detail_data":{"login":"work","steps":[]}}"#) == .success(.signinFill))
+check("signin.fill parses its steps", parsed(#"{"v":1,"event":"signin.fill","ts":1,"detail_data":{"login":"work","steps":[{"flow":"google","username":"someone@example.com"},{"flow":"okta","username":"someone","password":"pw","code":"123456"}]}}"#)
+      == .success(.signinFill(SigninRequest(login: "work", steps: [
+          SigninValues(flow: .google, username: "someone@example.com", password: nil, code: nil),
+          SigninValues(flow: .okta, username: "someone", password: "pw", code: "123456"),
+      ]))))
+check("signin.fill without steps is bad_request",
+      parsedCode(#"{"v":1,"event":"signin.fill","ts":1,"detail_data":{"login":"work","steps":[]}}"#) == .badRequest)
 check("an unknown event is bad_request", parsedCode(#"{"v":1,"event":"teleport","ts":1}"#) == .badRequest)
 check("another envelope version is bad_request", parsedCode(#"{"v":2,"event":"status","ts":1}"#) == .badRequest)
 check("garbage is bad_request", parsedCode("not json") == .badRequest)
@@ -331,10 +336,161 @@ let openFields = replyObject(Reply.ok(OpenData(url: nil, openedIn: .app)))?["dat
 check("open replies where it opened, with a null url", openFields?["opened_in"] as? String == "app" && openFields?["url"] is NSNull)
 let reloadFields = replyObject(Reply.ok(ReloadData(loaded: false, error: "bad")))?["data"] as? [String: Any]
 check("reload replies loaded and error", reloadFields?["loaded"] as? Bool == false && reloadFields?["error"] as? String == "bad")
-let refusal = replyObject(Reply.failure(.signinNotImplemented))
+let refusal = replyObject(Reply.failure(.signinBusy))
 check("an error reply is not ok and carries its code",
       refusal?["ok"] as? Bool == false && refusal?["code"] as? String == "unavailable")
-check("signin.fill says it is not implemented yet", (refusal?["error"] as? String)?.contains("not implemented yet") == true)
+check("a second signin.fill is refused while one runs", (refusal?["error"] as? String)?.contains("already being filled") == true)
+
+// MARK: - Sign-in
+
+let google = SigninFlow.google.spec
+let okta = SigninFlow.okta.spec
+check("google: the identifier page's fields", google.username.selectors == ["#identifierId", "input[type=email]"]
+      && google.username.submit.first == "#identifierNext button" && google.username.labels == ["Next"])
+check("google: the password and code fields", google.password.selectors.first == "input[name=Passwd]"
+      && google.code.selectors.prefix(2) == ["input[name=totpPin]", "#totpPin"])
+check("google: lives on accounts.google.com only", google.hosts.keeps(host: "accounts.google.com")
+      && !google.hosts.keeps(host: "mail.google.com") && !google.together && google.chooser != nil)
+check("okta: both widgets' username and password", okta.username.selectors.prefix(2) == ["input[name=identifier]", "#okta-signin-username"]
+      && okta.password.selectors.prefix(2) == ["input[name='credentials.passcode'][type=password]", "#okta-signin-password"])
+check("okta: a code is the passcode input that is not a password",
+      okta.code.selectors.first == "input[name='credentials.passcode']:not([type=password])" && okta.together)
+check("okta: any okta.com tenant", okta.hosts.keeps(host: "example.okta.com") && !okta.hosts.keeps(host: "okta.com"))
+check("okta: says what it waits for", okta.waitingReason == "waiting for you: approve the Okta sign-in")
+let argument = okta.scriptArgument
+check("the script gets every field's selectors as data",
+      ((argument["fields"] as? [String: Any])?["password"] as? [String: Any])?["selectors"] as? [String] == okta.password.selectors
+        && argument["chooser"] is NSNull && argument["markers"] as? [String] == okta.markers)
+check("the script defines berthSignin and returns its result",
+      SigninScript.source.contains("const berthSignin = async function (request)") && SigninScript.body.hasSuffix("return await berthSignin(request);"))
+
+let secretValues = SigninValues(flow: .okta, username: "someone@example.com", password: "hunter2-secret", code: "654321")
+let secretRequest = SigninRequest(login: "work", steps: [secretValues])
+let printed = [String(describing: secretValues), String(reflecting: secretValues), "\(secretRequest)",
+               String(reflecting: secretRequest), { var out = ""; dump(secretRequest, to: &out); return out }()].joined(separator: "\n")
+check("a sign-in request never prints its values",
+      !printed.contains("hunter2-secret") && !printed.contains("654321") && !printed.contains("someone@example.com"))
+check("it says which flows and values it carries", "\(secretRequest)" == "sign-in work: okta"
+      && "\(secretValues)" == "okta step (username, password, code)")
+func signinParseCode(_ detail: String) -> ErrorCode? {
+    parsedCode(#"{"v":1,"event":"signin.fill","ts":1,"detail_data":"# + detail + "}")
+}
+check("signin.fill refuses an unknown flow", signinParseCode(#"{"steps":[{"flow":"saml","username":"a"}]}"#) == .badRequest)
+check("signin.fill refuses an empty username", signinParseCode(#"{"steps":[{"flow":"okta","username":""}]}"#) == .badRequest)
+check("signin.fill refuses an unknown key", signinParseCode(#"{"steps":[{"flow":"okta","username":"a","otp":"1"}]}"#) == .badRequest)
+if case .failure(let error) = parsed(#"{"v":1,"event":"signin.fill","ts":1,"detail_data":{"steps":[{"flow":"okta","username":"a","password":7}]}}"#) {
+    check("a refusal names the key, not the value", error.message == "steps[0].password must be a non-empty string when given")
+} else {
+    check("a bad password is refused", false)
+}
+
+let t0 = Date(timeIntervalSince1970: 1_000_000)
+func at(_ seconds: TimeInterval) -> Date { t0.addingTimeInterval(seconds) }
+func googlePage(_ fields: (username: Bool, password: Bool, code: Bool) = (false, false, false)) -> PageObservation {
+    PageObservation(host: "accounts.google.com", marker: "#initialView", username: fields.username ? "#identifierId" : nil,
+                    password: fields.password ? "input[name=Passwd]" : nil, code: fields.code ? "#totpPin" : nil)
+}
+func oktaPage(username: Bool = false, password: Bool = false, code: Bool = false) -> PageObservation {
+    PageObservation(host: "example.okta.com", marker: "#okta-sign-in", username: username ? "input[name=identifier]" : nil,
+                    password: password ? "#okta-signin-password" : nil, code: code ? "input[name=answer]" : nil)
+}
+let inbox = PageObservation(host: "mail.example.com")
+
+var personal = SigninRun(steps: [.init(flow: .google, hasPassword: true, hasCode: true)], siteHost: "mail.example.com", start: t0)
+check("google: fills the identifier first", personal.next(googlePage((true, false, false)), now: at(1)) == .fill([.username]))
+personal.filled([.username], at: at(1))
+check("google: waits while the identifier page is still up", personal.next(googlePage((true, false, false)), now: at(2)) == .wait)
+check("google: never takes the identifier page's hidden password for the password page",
+      personal.next(googlePage((true, true, false)), now: at(2)) == .wait)
+check("google: then the password", personal.next(googlePage((false, true, false)), now: at(3)) == .fill([.password]))
+personal.filled([.password], at: at(3))
+check("google: then the code", personal.next(googlePage((false, false, true)), now: at(4)) == .fill([.code]))
+personal.filled([.code], at: at(4))
+check("google: waits while the page is loading", personal.next(PageObservation(host: "mail.example.com", loading: true), now: at(5)) == .wait)
+check("google: off the flow, waits for it to settle", personal.next(inbox, now: at(5)) == .wait)
+check("google: done once the page has left accounts.google.com",
+      personal.next(inbox, now: at(7)) == .finish(SigninOutcome(completed: ["google"], stoppedAt: nil, alreadySignedIn: false)))
+
+var work = SigninRun(steps: [.init(flow: .google, hasPassword: false, hasCode: false),
+                             .init(flow: .okta, hasPassword: true, hasCode: false)], siteHost: "mail.example.com", start: t0)
+check("work: gives google the email", work.next(googlePage((true, false, false)), now: at(1)) == .fill([.username]))
+work.filled([.username], at: at(1))
+// Each poll looks for the current flow's own markers and fields, so Okta's
+// page seen through Google's selectors shows only its host.
+let oktaThroughGoogle = PageObservation(host: "example.okta.com")
+check("work: google hands off to okta", work.next(oktaThroughGoogle, now: at(2)) == .wait
+      && work.next(oktaThroughGoogle, now: at(4)) == .wait && work.completed == ["google"])
+check("work: okta's identifier page", work.next(oktaPage(username: true), now: at(4.5)) == .fill([.username]))
+work.filled([.username], at: at(4.5))
+check("work: okta's password page", work.next(oktaPage(password: true), now: at(5)) == .fill([.password]))
+work.filled([.password], at: at(5))
+check("work: a push page waits for the person", work.next(oktaPage(), now: at(6)) == .wait
+      && work.waitingReason == "waiting for you: approve the Okta sign-in")
+check("work: a push never approved stops at the timeout, saying so", work.next(oktaPage(), now: at(121)) == .finish(SigninOutcome(
+    completed: ["google"], stoppedAt: SigninStop(step: 1, flow: "okta", reason: "waiting for you: approve the Okta sign-in"),
+    alreadySignedIn: false)))
+
+var classic = SigninRun(steps: [.init(flow: .okta, hasPassword: true, hasCode: true)], siteHost: "mail.example.com", start: t0)
+check("okta classic: username and password together", classic.next(oktaPage(username: true, password: true), now: at(1))
+      == .fill([.username, .password]))
+classic.filled([.username, .password], at: at(1))
+check("okta: fills a code on an Enter code page", classic.next(oktaPage(code: true), now: at(2)) == .fill([.code]))
+check("okta: a password still showing after the stall stops",
+      { () -> SigninDecision in var copy = classic; return copy.next(oktaPage(password: true), now: at(17)) }()
+        == .finish(SigninOutcome(completed: [], stoppedAt: SigninStop(step: 0, flow: "okta",
+            reason: "the page didn't accept the password on the okta password step"), alreadySignedIn: false)))
+
+var onlyEmail = SigninRun(steps: [.init(flow: .google, hasPassword: false, hasCode: false),
+                                  .init(flow: .okta, hasPassword: true, hasCode: false)], siteHost: "mail.example.com", start: t0)
+onlyEmail.filled([.username], at: at(1))
+check("google asking for a password on an email-only step stops", onlyEmail.next(googlePage((false, true, false)), now: at(2))
+      == .finish(SigninOutcome(completed: [], stoppedAt: SigninStop(step: 0, flow: "google",
+          reason: "the page asked for a password, but this google step gives only the email"), alreadySignedIn: false)))
+
+var noCode = SigninRun(steps: [.init(flow: .google, hasPassword: true, hasCode: false)], siteHost: "mail.example.com", start: t0)
+check("a code page without a code waits for the person", noCode.next(googlePage((false, false, true)), now: at(1)) == .wait
+      && noCode.waitingReason?.hasPrefix("waiting for you: enter the one-time code") == true)
+
+var signedIn = SigninRun(steps: [.init(flow: .google, hasPassword: true, hasCode: false)], siteHost: "mail.example.com", start: t0)
+check("already on the site: waits for it to settle", signedIn.next(inbox, now: at(1)) == .wait)
+check("already on the site: nothing to do", signedIn.next(inbox, now: at(3))
+      == .finish(SigninOutcome(completed: [], stoppedAt: nil, alreadySignedIn: true)))
+
+var lost = SigninRun(steps: [.init(flow: .google, hasPassword: true, hasCode: false)], siteHost: "mail.example.com", start: t0)
+check("another page: waits for the sign-in to appear", lost.next(PageObservation(host: "www.example.org"), now: at(5)) == .wait)
+check("another page: stops when it never appears", lost.next(PageObservation(host: "www.example.org"), now: at(31))
+      == .finish(SigninOutcome(completed: [], stoppedAt: SigninStop(step: 0, flow: "google",
+          reason: "the page didn't match the google sign-in: it shows www.example.org"), alreadySignedIn: false)))
+
+var chooser = SigninRun(steps: [.init(flow: .google, hasPassword: true, hasCode: false)], siteHost: "mail.example.com", start: t0)
+check("google: an account chooser is clicked through once", chooser.next(googlePage(), now: at(1)) == .choose)
+chooser.choseAccount()
+check("google: then waits for a field", chooser.next(googlePage(), now: at(2)) == .wait)
+check("google: a page with no field stops after the arrival time", chooser.next(googlePage(), now: at(32))
+      == .finish(SigninOutcome(completed: [], stoppedAt: SigninStop(step: 0, flow: "google",
+          reason: "the page didn't match the google username step: no username field"), alreadySignedIn: false)))
+
+var skipped = SigninRun(steps: [.init(flow: .google, hasPassword: false, hasCode: false),
+                                .init(flow: .okta, hasPassword: true, hasCode: false)], siteHost: "mail.example.com", start: t0)
+_ = skipped.next(googlePage((true, false, false)), now: at(1))
+skipped.filled([.username], at: at(1))
+_ = skipped.next(inbox, now: at(2))
+_ = skipped.next(inbox, now: at(4))
+check("a later step the site no longer needs ends the sign-in", skipped.next(inbox, now: at(5)) == .wait
+      && skipped.next(inbox, now: at(7)) == .finish(SigninOutcome(completed: ["google"], stoppedAt: nil, alreadySignedIn: false)))
+check("a fixture page on any host counts by its markers",
+      { () -> SigninDecision in
+        var run = SigninRun(steps: [.init(flow: .okta, hasPassword: true, hasCode: false)], siteHost: "127.0.0.1", start: t0)
+        return run.next(PageObservation(host: "127.0.0.1", marker: "#okta-sign-in", username: "input[name=identifier]"), now: at(1)) }()
+        == SigninDecision.fill([.username]))
+
+let signinReply = replyObject(Reply.ok(SigninData(completed: ["google"], stoppedAt: SigninStop(step: 1, flow: "okta", reason: "r"),
+                                                  url: "https://example.okta.com/signin", alreadySignedIn: false)))?["data"] as? [String: Any]
+check("signin.fill replies completed, stopped_at, url and already_signed_in",
+      signinReply?["completed"] as? [String] == ["google"] && (signinReply?["stopped_at"] as? [String: Any])?["flow"] as? String == "okta"
+        && (signinReply?["stopped_at"] as? [String: Any])?["step"] as? Int == 1 && signinReply?["already_signed_in"] as? Bool == false)
+let doneReply = replyObject(Reply.ok(SigninData(completed: [], stoppedAt: nil, url: nil, alreadySignedIn: true)))?["data"] as? [String: Any]
+check("a finished sign-in keeps stopped_at and url as null", doneReply?["stopped_at"] is NSNull && doneReply?["url"] is NSNull)
 
 // MARK: - Small rules
 
