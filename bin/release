@@ -29,7 +29,7 @@ set -euo pipefail
 
 ROOT="$(cd "$(dirname "$0")/.." && pwd)"
 REPO="kellyredding/berth"
-ASSET="berth-darwin-arm64.tar.gz"
+ASSET="berth-darwin.tar.gz"
 IDENTITY="Berth Release Signing"
 TEMPLATE_ID="com.kellyredding.berth"
 BINARY_ID="com.kellyredding.berth-cli"
@@ -179,9 +179,13 @@ berth_sha256="$(shasum -a 256 "$pkg/bin/berth" | cut -d' ' -f1)"
 # The last word, so "berth 1.2.3" and a bare "1.2.3" both read as 1.2.3.
 have="$("$pkg/bin/berth" --version </dev/null)" || die "bin/berth --version failed"
 [[ "${have##* }" == "$version" ]] || die "berth reports '$have', not $version"
-libs="$(otool -L "$pkg/bin/berth")"
-outside="$(printf '%s\n' "$libs" | tail -n +2 | awk '{print $1}' | { grep -v '^/usr/lib/' || true; })"
+libs="$(otool -arch all -L "$pkg/bin/berth")"
+outside="$(printf '%s\n' "$libs" | awk '/^\t/ {print $1}' | { grep -v '^/usr/lib/' || true; })"
 [[ -z "$outside" ]] || die "berth links libraries outside /usr/lib:"$'\n'"$libs"
+for executable in "$pkg/bin/berth" "$pkg/Berth.app/Contents/MacOS/Berth"; do
+  lipo "$executable" -verify_arch arm64 x86_64 \
+    || die "$(basename "$executable") is not universal (arm64 and x86_64)"
+done
 cmp -s "$pkg/libexec/sign-app.sh" bin/lib/sign-app.sh || die "libexec/sign-app.sh is not this commit's bin/lib/sign-app.sh"
 plist="$pkg/Berth.app/Contents/Info.plist"
 br_plist() { /usr/bin/plutil -extract "$1" raw -o - "$plist" 2>/dev/null; }
@@ -215,7 +219,7 @@ notes="$verify/notes.md"
   echo
   echo "Update an existing install with \`berth update\`."
   echo
-  echo "Apple Silicon, macOS 26 or later. Use the script, not a browser download:"
+  echo "macOS 15 or later, on Apple Silicon or Intel. Use the script, not a browser download:"
   echo "the apps are self-signed."
   echo
   echo "Then build your site apps: \`berth sites build --all\`."

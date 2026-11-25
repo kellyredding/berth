@@ -3,8 +3,8 @@
 # signs both with the "Berth Release Signing" identity, and writes one archive
 # for install.sh:
 #
-#   <out>/berth-darwin-arm64.tar.gz
-#   <out>/berth-darwin-arm64.tar.gz.sha256
+#   <out>/berth-darwin.tar.gz
+#   <out>/berth-darwin.tar.gz.sha256
 #
 # Usage: bin/package [--local] [--sign op|adhoc] [--out DIR]
 #
@@ -17,12 +17,15 @@
 set -euo pipefail
 
 ROOT="$(cd "$(dirname "$0")/.." && pwd)"
-ASSET="berth-darwin-arm64.tar.gz"
+ASSET="berth-darwin.tar.gz"
 TEMPLATE_ID="com.kellyredding.berth"
 # Not under the template's identifier plus a dot, where site apps live: a site
 # named "cli" would share it.
 BINARY_ID="com.kellyredding.berth-cli"
-MIN_MACOS=26
+# The Mac that builds a release, and the oldest Mac it runs on (install.sh's
+# floor, set in tools/berth/Makefile and BerthApp/project.yml).
+BUILD_MACOS=26
+TARGET_MACOS=15.0
 
 local_build=false
 sign=op
@@ -77,7 +80,7 @@ fi
 
 [[ "$(uname -m)" == "arm64" ]] || die "Berth releases are built on Apple Silicon (arm64) only."
 macos="$(sw_vers -productVersion)"
-(( ${macos%%.*} >= MIN_MACOS )) || die "macOS $MIN_MACOS or later is required (this Mac runs $macos)."
+(( ${macos%%.*} >= BUILD_MACOS )) || die "macOS $BUILD_MACOS or later is required to build (this Mac runs $macos)."
 
 for cmd in git xcodebuild xcodegen crystal node tar shasum otool codesign; do
   command -v "$cmd" >/dev/null || die "'$cmd' is not installed; the build needs it."
@@ -156,9 +159,23 @@ bp_stamp BerthBuiltAt string "$built_at"
 
 # A release binary that loads a library from anywhere but /usr/lib starts
 # only on Macs that happen to have that library where this one does.
-libs="$(otool -L "$stage/bin/berth")"
-outside="$(printf '%s\n' "$libs" | tail -n +2 | awk '{print $1}' | { grep -v '^/usr/lib/' || true; })"
+libs="$(otool -arch all -L "$stage/bin/berth")"
+outside="$(printf '%s\n' "$libs" | awk '/^\t/ {print $1}' | { grep -v '^/usr/lib/' || true; })"
 [[ -z "$outside" ]] || die "berth links libraries outside /usr/lib:"$'\n'"$libs"
+
+# One archive serves both kinds of Mac, and either executable built for a
+# newer macOS refuses to start on the oldest Mac install.sh accepts.
+app_minos="$(bp_plist LSMinimumSystemVersion)" || die "Berth.app has no LSMinimumSystemVersion"
+[[ "$app_minos" == "$TARGET_MACOS" ]] || die "Berth.app is built for macOS $app_minos, not $TARGET_MACOS"
+for executable in "$stage/bin/berth" "$stage/Berth.app/Contents/MacOS/Berth"; do
+  name="$(basename "$executable")"
+  for arch in arm64 x86_64; do
+    lipo "$executable" -verify_arch "$arch" || die "$name has no $arch code; a release is universal"
+    load_commands="$(otool -arch "$arch" -l "$executable")"
+    minos="$(printf '%s\n' "$load_commands" | awk '/LC_BUILD_VERSION/ {found=1} found && $1 == "minos" {print $2; exit}')"
+    [[ "$minos" == "$TARGET_MACOS" ]] || die "$name ($arch) is built for macOS ${minos:-unknown}, not $TARGET_MACOS"
+  done
+done
 
 # Signed last: any change to either target after this breaks its signature.
 say "Signing Berth.app and berth ($sign)"

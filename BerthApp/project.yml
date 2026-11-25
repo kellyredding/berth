@@ -2,9 +2,9 @@ name: BerthApp
 options:
   bundleIdPrefix: com.kellyredding
   deploymentTarget:
-    # WKWebsiteDataStore(forIdentifier:), one persistent store per site, is
-    # macOS 14 and later.
-    macOS: "14.0"
+    # The oldest macOS a release is tried on. tools/berth/Makefile and
+    # install.sh hold the same floor, and bin/package checks both products.
+    macOS: "15.0"
 
 targets:
   # The template every site app is copied from: `berth sites build` copies

@@ -35,7 +35,7 @@ private PACKAGE = <<-SH
     shift
   done
   mkdir -p "$out"
-  echo archive > "$out/berth-darwin-arm64.tar.gz"
+  echo archive > "$out/berth-darwin.tar.gz"
 
   SH
 
@@ -144,7 +144,7 @@ describe "berth update" do
       result.exit_code.should eq(0), result.stderr
 
       out_dir = result.stdout[/^package --local --out (\S+)$/m, 1]
-      archive = "#{out_dir}/berth-darwin-arm64.tar.gz"
+      archive = "#{out_dir}/berth-darwin.tar.gz"
       result.stdout.should contain("install.sh --from #{archive} --preview\narchive present\n")
       Dir.exists?(out_dir).should be_false
     end
@@ -186,7 +186,7 @@ describe "berth update" do
       root = SpecHelper.checkout(sandbox, package: "#!/bin/sh\nexit 0\n", install: INSTALL)
       result = SpecHelper.run(sandbox, ["update", "--local", root.to_s])
       result.exit_code.should eq(1)
-      result.stderr.should contain("bin/package wrote no berth-darwin-arm64.tar.gz")
+      result.stderr.should contain("bin/package wrote no berth-darwin.tar.gz")
       result.stdout.should_not contain("install.sh")
     end
   end

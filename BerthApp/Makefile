@@ -42,9 +42,10 @@ smoke: generate
 check: build smoke
 
 # The template `berth sites build --template` takes in development:
-# build/Build/Products/Release/Berth.app.
+# build/Build/Products/Release/Berth.app. Universal, since a site app is a copy.
 release: generate validate-js
-	$(XCODEBUILD) -scheme $(SCHEME) -configuration $(CONFIG_RELEASE) build
+	$(XCODEBUILD) -scheme $(SCHEME) -configuration $(CONFIG_RELEASE) \
+	  ARCHS="arm64 x86_64" ONLY_ACTIVE_ARCH=NO build
 	@$(LSREGISTER) -u "$(CURDIR)/$(DERIVED_DATA)/Build/Products/$(CONFIG_RELEASE)/$(APP_NAME).app" 2>/dev/null || true
 
 # Draws every size of the app icon from its geometry.

@@ -9,7 +9,7 @@ module Berth
       extend self
 
       INSTALL_SCRIPT_URL = "https://raw.githubusercontent.com/kellyredding/berth/main/install.sh"
-      ARCHIVE            = "berth-darwin-arm64.tar.gz"
+      ARCHIVE            = "berth-darwin.tar.gz"
       SWITCHES           = ["--local", "--preview", "--force", "--no-sites"]
 
       HELP = <<-TEXT

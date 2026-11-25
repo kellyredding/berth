@@ -138,14 +138,14 @@ template's ("Releases and installs").
 
 ### The archive
 
-`bin/package` writes `berth-darwin-arm64.tar.gz` and its
-`berth-darwin-arm64.tar.gz.sha256` (`shasum -a 256` output). The archive holds
+`bin/package` writes `berth-darwin.tar.gz` and its
+`berth-darwin.tar.gz.sha256` (`shasum -a 256` output). The archive holds
 one directory, `berth/`:
 
 | Path | What |
 |---|---|
-| `bin/berth` | The CLI, a release build that links only `/usr/lib` libraries (`otool -L`), built for macOS 26, signed with the identifier `com.kellyredding.berth-cli` |
-| `Berth.app` | The template: a Release build for macOS 14 and later, bundle identifier `com.kellyredding.berth`, no `BerthSite`, stamped with `CFBundleShortVersionString` (from `VERSION`), `BerthBuildCommit`, `BerthBuildDirty` and `BerthBuiltAt` |
+| `bin/berth` | The CLI, a universal (`arm64` and `x86_64`) release build that links only `/usr/lib` libraries (`otool -L`), built for macOS 15 and later, signed with the identifier `com.kellyredding.berth-cli` |
+| `Berth.app` | The template: a universal Release build for macOS 15 and later, bundle identifier `com.kellyredding.berth`, no `BerthSite`, stamped with `CFBundleShortVersionString` (from `VERSION`), `BerthBuildCommit`, `BerthBuildDirty` and `BerthBuiltAt` |
 | `libexec/sign-app.sh` | `bin/lib/sign-app.sh`, which an installed `berth sites build` runs |
 | `manifest.json` | The build record, below |
 | `VERSION` | The version |
@@ -179,7 +179,7 @@ Run as `curl -fsSL …/main/install.sh | bash`, or by `berth update`, with
 `--version X.Y.Z`, `--from ARCHIVE`, `--preview` or `--force`. It is one
 `{ … }` block, so a truncated download runs none of it.
 
-1. Refuses anything but Apple Silicon on macOS 26 or later.
+1. Refuses anything but macOS 15 or later.
 2. Downloads the latest release's archive and checksum with `curl` (no
    quarantine flag), or `--version`'s, or copies `--from ARCHIVE` and its
    `ARCHIVE.sha256`, rewriting the file name in the checksum so an archive

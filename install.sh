@@ -22,10 +22,10 @@
 set -euo pipefail
 
 REPO="kellyredding/berth"
-ASSET="berth-darwin-arm64.tar.gz"
+ASSET="berth-darwin.tar.gz"
 IDENTITY="Berth Release Signing"
 TEMPLATE_ID="com.kellyredding.berth"
-MIN_MACOS=26
+MIN_MACOS=15
 BERTH_HOME="${BERTH_ROOT:-$HOME/.berth}"
 BIN_DIR="$BERTH_HOME/bin"
 LOCAL_BIN="$HOME/.local/bin"
@@ -65,9 +65,7 @@ die() { printf '%sinstall.sh: %s%s\n' "$RED" "$*" "$NC" >&2; exit 1; }
 
 # --- This Mac ----------------------------------------------------------------
 
-# The CLI is built for macOS 26; the template app would run on 14.
-[[ "$(uname -s)" == "Darwin" && "$(uname -m)" == "arm64" ]] \
-  || die "Berth releases are built for Apple Silicon Macs only; this is $(uname -s) on $(uname -m)."
+[[ "$(uname -s)" == "Darwin" ]] || die "Berth runs on macOS only; this is $(uname -s)."
 macos="$(sw_vers -productVersion)"
 (( ${macos%%.*} >= MIN_MACOS )) || die "Berth needs macOS $MIN_MACOS or later; this Mac runs $macos."
 

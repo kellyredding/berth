@@ -25,7 +25,7 @@ handle `mailto:` links, and sign in from 1Password.
 
 ## Install
 
-Apple Silicon, macOS 26 or later:
+macOS 15 or later, on Apple Silicon or Intel:
 
 ```bash
 curl -fsSL https://raw.githubusercontent.com/kellyredding/berth/main/install.sh | bash
