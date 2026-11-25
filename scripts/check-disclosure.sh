@@ -130,6 +130,12 @@ bd_scan "1Password reference to a vault that is not a placeholder" \
   'op://([^/\s"'"'"'`)\]},][^/"'"'"'`)\]},]*)?' "" \
   'op://([A-Z]+|<[^>]*>|…|Vault|Example[^/]*|Work|Personal|[\[(].*)?'
 
+# A 1Password sign-in address names an account, even the common
+# my.1password.com. The placeholders are example and an <account>.
+bd_scan "1Password account address that is not a placeholder" \
+  '(<[^>[:space:]]*>|[a-z0-9][a-z0-9_-]*)\.1password\.(com|eu|ca)' "" \
+  '(?i)(example|<[^>]*>)\.1password\.(com|eu|ca)'
+
 # 1Password item, vault and account IDs are 26 letters and digits. One with
 # no digit, or no letter, is a word or a number, such as the specs' made-up
 # account ID, ABCDEFGHIJKLMNOPQRSTUVWXYZ.

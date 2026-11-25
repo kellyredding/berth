@@ -39,8 +39,8 @@ later commit, so run it before committing.
 
 The audit (`scripts/check-disclosure.sh`) has two layers: structural patterns
 that describe the shape of a leak (an email address off `example.*`, an
-`op://` reference to a vault that is not a placeholder, a 1Password-style
-ID, a `/Users/<name>` path, a real host in a fixture or the starter config),
+`op://` reference to a vault that is not a placeholder, a 1Password sign-in
+address other than `example.1password.com`, a 1Password-style ID, a `/Users/<name>` path, a real host in a fixture or the starter config),
 and a literal denylist kept outside the repository, since committing it
 would be the leak: `BERTH_DENYLIST`, else `~/.berth/denylist.txt`, one term
 per line, ignoring case, `#` for comments. It prints only the file and line
