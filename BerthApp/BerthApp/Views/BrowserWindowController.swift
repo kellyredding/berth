@@ -15,7 +15,8 @@ final class BrowserWindowController: NSWindowController, NSWindowDelegate, WKNav
     private let findBar = FindBar()
     private var findBarHeight: NSLayoutConstraint!
     private var observations: [NSKeyValueObservation] = []
-    private var hasLoadedPage = false
+    /// Popups only: whether the window appears, or hands off and closes.
+    private var popupGate: PopupGate?
 
     init(model: AppModel, configuration: WKWebViewConfiguration, role: Role, features: WKWindowFeatures? = nil) {
         self.model = model
@@ -49,6 +50,7 @@ final class BrowserWindowController: NSWindowController, NSWindowDelegate, WKNav
             window.setFrameAutosaveName(name)
         case .popup:
             window.center()
+            popupGate = PopupGate()
         }
 
         observations.append(webView.observe(\.title, options: [.initial, .new]) { [weak self] _, _ in
@@ -216,20 +218,59 @@ final class BrowserWindowController: NSWindowController, NSWindowDelegate, WKNav
         let url = navigationAction.request.url
         let commandClick = navigationAction.navigationType == .linkActivated
             && navigationAction.modifierFlags.contains(.command)
-        let route = LinkPolicy.navigation(url, mainFrame: navigationAction.targetFrame?.isMainFrame ?? true,
-                                          commandClick: commandClick, keep: model.keep)
+        let mainFrame = navigationAction.targetFrame?.isMainFrame ?? true
+        let route = LinkPolicy.navigation(url, mainFrame: mainFrame, commandClick: commandClick, keep: model.keep)
+        if mainFrame, var gate = popupGate {
+            let action = gate.navigation(route)
+            popupGate = gate
+            switch action {
+            case .allow:
+                decisionHandler(.allow)
+                return
+            case .handOffAndClose:
+                decisionHandler(.cancel)
+                if let url { model.openExternally(url) }
+                Log.info("popup: handed off \(url?.host ?? "\(url?.scheme ?? "no") URL"), closed")
+                window?.close()
+                return
+            case .close:
+                decisionHandler(.cancel)
+                Log.info("popup: dropped a \(url?.scheme ?? "no"): URL, closed")
+                window?.close()
+                return
+            case .none, .startGrace, .show:
+                break
+            }
+        }
         switch route {
         case .app:
             decisionHandler(.allow)
         case .browser:
             decisionHandler(.cancel)
             if let url { model.openExternally(url) }
-            closeIfNeverLoaded()
         case .ignore:
             decisionHandler(.cancel)
             Log.info("dropped a navigation to \(url?.scheme ?? "no"): URL")
-            closeIfNeverLoaded()
         }
+    }
+
+    func webView(_ webView: WKWebView, didCommit navigation: WKNavigation!) {
+        guard var gate = popupGate else { return }
+        let action = gate.committed(inScope: webView.url.map(model.keep.keeps) ?? false)
+        popupGate = gate
+        guard case .startGrace(let generation) = action else { return }
+        DispatchQueue.main.asyncAfter(deadline: .now() + PopupGate.grace) { [weak self] in
+            MainActor.assumeIsolated { self?.popupGraceElapsed(generation) }
+        }
+    }
+
+    private func popupGraceElapsed(_ generation: Int) {
+        guard var gate = popupGate else { return }
+        let action = gate.graceElapsed(generation)
+        popupGate = gate
+        guard action == .show else { return }
+        Log.info("popup: shown \(webView.url?.host ?? "a page")")
+        show()
     }
 
     func webView(_ webView: WKWebView, decidePolicyFor navigationResponse: WKNavigationResponse,
@@ -252,7 +293,6 @@ final class BrowserWindowController: NSWindowController, NSWindowDelegate, WKNav
     }
 
     func webView(_ webView: WKWebView, didFinish navigation: WKNavigation!) {
-        hasLoadedPage = true
         if role == .main { model.mainPageFinished(webView.url) }
     }
 
@@ -267,12 +307,6 @@ final class BrowserWindowController: NSWindowController, NSWindowDelegate, WKNav
     func webViewWebContentProcessDidTerminate(_ webView: WKWebView) {
         Log.error("the page's web content process ended; reloading")
         webView.reload()
-    }
-
-    /// A popup whose first page went to the browser would stay blank.
-    private func closeIfNeverLoaded() {
-        guard role == .popup, !hasLoadedPage else { return }
-        window?.close()
     }
 
     private func logFailure(_ error: Error) {

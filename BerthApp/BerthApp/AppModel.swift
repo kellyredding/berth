@@ -164,10 +164,10 @@ final class AppModel: ObservableObject {
         activate()
     }
 
+    /// The popup's window stays hidden until its PopupGate shows it.
     func openPopup(configuration: WKWebViewConfiguration, features: WKWindowFeatures) -> WKWebView {
         let controller = BrowserWindowController(model: self, configuration: configuration, role: .popup, features: features)
         popups.append(controller)
-        controller.show()
         return controller.webView
     }
 

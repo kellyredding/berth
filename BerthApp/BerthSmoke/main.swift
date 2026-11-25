@@ -172,6 +172,52 @@ check("an outside URL handed to the app goes to the browser",
       LinkPolicy.external(url("https://news.example.org/"), keep: keep) == .browser)
 check("a kept URL handed to the app loads", LinkPolicy.external(url("https://mail.example.com/#inbox"), keep: keep) == .app)
 
+// MARK: - Popup gate
+
+func popupRun(_ events: [(PopupGate) -> (PopupGate, PopupGate.Action)]) -> (PopupGate, [PopupGate.Action]) {
+    var gate = PopupGate()
+    var actions: [PopupGate.Action] = []
+    for event in events {
+        let (next, action) = event(gate)
+        gate = next
+        actions.append(action)
+    }
+    return (gate, actions)
+}
+
+func nav(_ route: Route) -> (PopupGate) -> (PopupGate, PopupGate.Action) {
+    { var gate = $0; let action = gate.navigation(route); return (gate, action) }
+}
+
+func commit(inScope: Bool) -> (PopupGate) -> (PopupGate, PopupGate.Action) {
+    { var gate = $0; let action = gate.committed(inScope: inScope); return (gate, action) }
+}
+
+func grace(_ generation: Int) -> (PopupGate) -> (PopupGate, PopupGate.Action) {
+    { var gate = $0; let action = gate.graceElapsed(generation); return (gate, action) }
+}
+
+let blankThenKept = popupRun([nav(.app), commit(inScope: false), nav(.app), commit(inScope: true), grace(1)])
+check("popup: about:blank, then in scope: shown once it settles",
+      blankThenKept.1 == [.allow, .none, .allow, .startGrace(generation: 1), .show] && blankThenKept.0.isShown)
+let redirector = popupRun([nav(.app), commit(inScope: false), nav(.app), commit(inScope: true), nav(.browser), grace(1)])
+check("popup: about:blank, an in-scope redirect, then out of scope: handed off and closed, never shown",
+      redirector.1 == [.allow, .none, .allow, .startGrace(generation: 1), .handOffAndClose, .none]
+        && redirector.0.state == .closed)
+let kept = popupRun([nav(.app), commit(inScope: true), grace(1)])
+check("popup: in scope immediately: shown", kept.1 == [.allow, .startGrace(generation: 1), .show] && kept.0.isShown)
+let outside = popupRun([nav(.browser), commit(inScope: true), grace(1)])
+check("popup: out of scope immediately: handed off and closed",
+      outside.1 == [.handOffAndClose, .none, .none] && outside.0.state == .closed)
+let dropped = popupRun([nav(.ignore)])
+check("popup: a dropped scheme closes it", dropped.1 == [.close] && dropped.0.state == .closed)
+let twoPages = popupRun([nav(.app), commit(inScope: true), nav(.app), commit(inScope: true), grace(1), grace(2)])
+check("popup: a second in-scope page restarts the grace",
+      twoPages.1 == [.allow, .startGrace(generation: 1), .allow, .startGrace(generation: 2), .none, .show])
+let afterShown = popupRun([nav(.app), commit(inScope: true), grace(1), nav(.browser), commit(inScope: false)])
+check("popup: once shown it routes like any window and stays open",
+      afterShown.1.suffix(2) == [.none, .none] && afterShown.0.isShown)
+
 // MARK: - Badge
 
 let badge = BadgeRule(pattern: "\\((\\d+)\\)")
