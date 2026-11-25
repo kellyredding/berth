@@ -40,8 +40,28 @@ struct KeepList: Equatable {
     }
 }
 
-/// Where a navigation or a new window goes. Out-of-scope pages, ⌘-clicks and
-/// other apps' schemes (`mailto:`, `tel:`, `zoommtg:`) leave the app.
+/// What started a navigation: `WKNavigationType` without WebKit.
+enum NavigationKind: Equatable {
+    case link, formSubmission, formResubmission, backForward, reload
+    /// A server or script redirect, or anything else the page did itself.
+    case other
+
+    var label: String {
+        switch self {
+        case .link: return "link"
+        case .formSubmission: return "form"
+        case .formResubmission: return "form resubmission"
+        case .backForward: return "back/forward"
+        case .reload: return "reload"
+        case .other: return "redirect"
+        }
+    }
+}
+
+/// Where a navigation or a new window goes. A clicked link out of scope, a
+/// ⌘-click and other apps' schemes (`mailto:`, `tel:`, `zoommtg:`) leave the
+/// app; redirects, form posts, reloads and history stay, whatever the host,
+/// so a sign-in's chain of hosts finishes in the app.
 enum LinkPolicy {
     enum Route: Equatable {
         /// Load it here (or, for a new window, in a second window of this app).
@@ -60,14 +80,31 @@ enum LinkPolicy {
         return scheme == "http" || scheme == "https"
     }
 
-    static func navigation(_ url: URL?, mainFrame: Bool, commandClick: Bool, keep: KeepList) -> Route {
+    static func navigation(_ url: URL?, kind: NavigationKind, mainFrame: Bool, commandClick: Bool,
+                           keep: KeepList) -> Route {
         guard let url, let scheme = url.scheme?.lowercased() else { return .app }
         if isWeb(url) {
             if !mainFrame { return .app }
             if commandClick { return .browser }
+            guard kind == .link else { return .app }
             return keep.keeps(url) ? .app : .browser
         }
         return byScheme(scheme)
+    }
+
+    /// A main-frame navigation in a popup that has not shown a page yet. The
+    /// popup exists to open a link, so an out-of-scope destination leaves
+    /// however it was reached: through a redirector, say.
+    static func popupDestination(_ url: URL?, keep: KeepList) -> Route {
+        guard let url, let scheme = url.scheme?.lowercased() else { return .app }
+        if isWeb(url) { return keep.keeps(url) ? .app : .browser }
+        return byScheme(scheme)
+    }
+
+    /// Host and path, for the log: a URL's query and fragment can carry tokens.
+    static func hostAndPath(_ url: URL) -> String {
+        guard let host = url.host else { return "\(url.scheme ?? "a"): URL" }
+        return "\(host)\(url.path.isEmpty ? "/" : url.path)"
     }
 
     /// `target=_blank` and `window.open`. A blank popup stays in the app: the

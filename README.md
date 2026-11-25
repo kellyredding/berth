@@ -49,7 +49,9 @@ never the link. Without a config file Berth uses `config/starter.json`;
 ```
 
 Each site becomes `~/Applications/<name>.app`. `keep` lists the hosts whose
-pages stay in the app (exact, or `*.example.com` for any subdomain); `icon` is
+links stay in the app when clicked (exact, or `*.example.com` for any
+subdomain); redirects and form posts stay wherever they go, so a sign-in
+through other hosts finishes in the app; `icon` is
 a PNG beside the config; `badge.title` is a regular expression whose one
 capture group, found in the page title, becomes the Dock badge. `signin` names
 logins whose steps fill a sign-in page from 1Password items.

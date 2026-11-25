@@ -216,12 +216,11 @@ final class BrowserWindowController: NSWindowController, NSWindowDelegate, WKNav
             return
         }
         let url = navigationAction.request.url
-        let commandClick = navigationAction.navigationType == .linkActivated
-            && navigationAction.modifierFlags.contains(.command)
+        let kind = Self.kind(navigationAction.navigationType)
+        let commandClick = kind == .link && navigationAction.modifierFlags.contains(.command)
         let mainFrame = navigationAction.targetFrame?.isMainFrame ?? true
-        let route = LinkPolicy.navigation(url, mainFrame: mainFrame, commandClick: commandClick, keep: model.keep)
         if mainFrame, var gate = popupGate {
-            let action = gate.navigation(route)
+            let action = gate.navigation(LinkPolicy.popupDestination(url, keep: model.keep))
             popupGate = gate
             switch action {
             case .allow:
@@ -242,15 +241,41 @@ final class BrowserWindowController: NSWindowController, NSWindowDelegate, WKNav
                 break
             }
         }
+        let route = LinkPolicy.navigation(url, kind: kind, mainFrame: mainFrame, commandClick: commandClick, keep: model.keep)
         switch route {
         case .app:
             decisionHandler(.allow)
+            if mainFrame, let url { logCrossHost(url, kind: kind) }
         case .browser:
             decisionHandler(.cancel)
-            if let url { model.openExternally(url) }
+            if let url {
+                Log.info("handed to browser (\(commandClick ? "⌘-click" : kind.label)): " +
+                         (LinkPolicy.isWeb(url) ? LinkPolicy.hostAndPath(url) : "a \(url.scheme ?? "no"): URL"))
+                model.openExternally(url)
+            }
         case .ignore:
             decisionHandler(.cancel)
             Log.info("dropped a navigation to \(url?.scheme ?? "no"): URL")
+        }
+    }
+
+    /// One line per main-frame move to another host, so a sign-in chain that
+    /// goes wrong can be followed in the log.
+    private func logCrossHost(_ url: URL, kind: NavigationKind) {
+        guard LinkPolicy.isWeb(url), let host = url.host?.lowercased(),
+              host != webView.url?.host?.lowercased() else { return }
+        let label = model.keep.keeps(url) ? "navigation" : "left site"
+        Log.info("\(label) (\(kind.label), stays): \(LinkPolicy.hostAndPath(url))")
+    }
+
+    private static func kind(_ type: WKNavigationType) -> NavigationKind {
+        switch type {
+        case .linkActivated: return .link
+        case .formSubmitted: return .formSubmission
+        case .formResubmitted: return .formResubmission
+        case .backForward: return .backForward
+        case .reload: return .reload
+        default: return .other
         }
     }
 

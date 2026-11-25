@@ -149,19 +149,34 @@ check("an empty keep keeps nothing", !KeepList([]).keeps(host: "mail.example.com
 func url(_ text: String) -> URL { URL(string: text)! }
 typealias Route = LinkPolicy.Route
 
-check("a kept page stays", LinkPolicy.navigation(url("https://mail.example.com/x"), mainFrame: true, commandClick: false, keep: keep) == .app)
-check("an outside page goes to the browser",
-      LinkPolicy.navigation(url("https://news.example.org/"), mainFrame: true, commandClick: false, keep: keep) == .browser)
-check("a ⌘-click on a kept page goes to the browser",
-      LinkPolicy.navigation(url("https://mail.example.com/x"), mainFrame: true, commandClick: true, keep: keep) == .browser)
-check("an outside subframe loads in place",
-      LinkPolicy.navigation(url("https://cdn.example.net/frame"), mainFrame: false, commandClick: false, keep: keep) == .app)
-check("mailto goes out", LinkPolicy.navigation(url("mailto:someone@example.com"), mainFrame: true, commandClick: false, keep: keep) == .browser)
-check("tel goes out", LinkPolicy.navigation(url("tel:+15555550100"), mainFrame: true, commandClick: false, keep: keep) == .browser)
-check("an app scheme goes out", LinkPolicy.navigation(url("zoommtg://example.com/join"), mainFrame: false, commandClick: false, keep: keep) == .browser)
-check("about:blank stays", LinkPolicy.navigation(url("about:blank"), mainFrame: true, commandClick: false, keep: keep) == .app)
-check("blob stays", LinkPolicy.navigation(url("blob:https://mail.example.com/1"), mainFrame: true, commandClick: false, keep: keep) == .app)
-check("file is dropped", LinkPolicy.navigation(url("file:///etc/hosts"), mainFrame: true, commandClick: false, keep: keep) == .ignore)
+func route(_ text: String, _ kind: NavigationKind = .link, mainFrame: Bool = true, commandClick: Bool = false) -> Route {
+    LinkPolicy.navigation(url(text), kind: kind, mainFrame: mainFrame, commandClick: commandClick, keep: keep)
+}
+
+check("a clicked link in scope stays", route("https://mail.example.com/x") == .app)
+check("a clicked link out of scope goes to the browser", route("https://news.example.org/") == .browser)
+check("a redirect out of scope stays", route("https://accounts.example.org/SetSID", .other) == .app)
+check("a form post to another host stays", route("https://login.example.org/acs", .formSubmission) == .app)
+check("a form resubmission, a reload and history stay out of scope too",
+      [NavigationKind.formResubmission, .reload, .backForward].allSatisfy { route("https://news.example.org/", $0) == .app })
+check("a ⌘-click on a kept page goes to the browser", route("https://mail.example.com/x", commandClick: true) == .browser)
+check("a ⌘-click goes to the browser whatever started it", route("https://mail.example.com/x", .other, commandClick: true) == .browser)
+check("an outside subframe loads in place", route("https://cdn.example.net/frame", mainFrame: false) == .app)
+check("mailto goes out", route("mailto:someone@example.com") == .browser)
+check("a redirect to a non-web scheme goes out", route("zoommtg://example.com/join", .other) == .browser)
+check("tel goes out", route("tel:+15555550100") == .browser)
+check("an app scheme goes out", route("zoommtg://example.com/join", mainFrame: false) == .browser)
+check("about:blank stays", route("about:blank") == .app)
+check("blob stays", route("blob:https://mail.example.com/1") == .app)
+check("file is dropped", route("file:///etc/hosts") == .ignore && route("file:///etc/hosts", .other) == .ignore)
+check("an unshown popup's out-of-scope redirect leaves",
+      LinkPolicy.popupDestination(url("https://news.example.org/"), keep: keep) == .browser)
+check("an unshown popup's blank and in-scope pages stay",
+      LinkPolicy.popupDestination(url("about:blank"), keep: keep) == .app
+        && LinkPolicy.popupDestination(nil, keep: keep) == .app
+        && LinkPolicy.popupDestination(url("https://mail.example.com/url?q=x"), keep: keep) == .app)
+check("the log gets host and path, never the query",
+      LinkPolicy.hostAndPath(url("https://accounts.example.org/SetSID?ssdc=1&token=abc#x")) == "accounts.example.org/SetSID")
 check("a kept popup opens a second window", LinkPolicy.newWindow(url("https://accounts.example.com/choose"), commandClick: false, keep: keep) == .app)
 check("an outside popup goes to the browser", LinkPolicy.newWindow(url("https://docs.example.org/"), commandClick: false, keep: keep) == .browser)
 check("a ⌘-clicked target=_blank goes to the browser", LinkPolicy.newWindow(url("https://mail.example.com/x"), commandClick: true, keep: keep) == .browser)

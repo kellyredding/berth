@@ -156,9 +156,16 @@ bundle identifier (`com.kellyredding.berth.mail`).
 - **`keep`** holds exact hosts (`mail.example.com`) and suffix patterns
   (`*.example.com`). A suffix pattern matches any host ending in
   `.example.com`, not `example.com` itself. Matching ignores case and the
-  port. A navigation to a kept host stays in the app, and an in-app popup on
-  one opens in a second window; anything else, whether a link,
-  `target=_blank`, `window.open` or a ⌘-click, opens in the default browser.
+  port. `keep` decides where the person's own moves go: a clicked link to a
+  kept host loads in the app, and one to any other host opens in the default
+  browser, as does every ⌘-click. What the page does itself stays in the app
+  whatever the host: redirects (server or script), form submissions, reloads
+  and back/forward, which is what keeps a sign-in's chain of hosts intact.
+  A new window (`target=_blank`, `window.open`) opens in a second window,
+  hidden until a kept page has loaded in it and stayed; if it is sent out of
+  scope before then, by a link or a redirector, that URL opens in the default
+  browser and the window closes. Other apps' schemes (`mailto:`, `tel:`) go
+  to their apps; `file:` is dropped.
 - **`icon`** is a path relative to the directory the config file really
   lives in (after following its symlink), or an absolute path. `~` is not
   expanded.
