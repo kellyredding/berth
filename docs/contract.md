@@ -60,6 +60,12 @@ run against temporary directories.
 | `codesign`, `sips`, `iconutil` | `/usr/bin/…` | `BERTH_CODESIGN`, `BERTH_SIPS`, `BERTH_ICONUTIL` (specs) |
 | `lsregister` | Launch Services' own, in `CoreServices.framework` | `BERTH_LSREGISTER` (specs) |
 
+A site app runs the CLI with its own environment, so the `BERTH_*`
+overrides it was given reach the CLI too, except `PATH`:
+`/opt/homebrew/bin:/usr/local/bin`, then the app's own `PATH`, then
+`/usr/bin:/bin:/usr/sbin:/sbin`, each directory once. An app opened from the
+Dock has launchd's minimal `PATH`, and `berth signin` runs `op` from `PATH`.
+
 The last three rows are the CLI's alone; the app never builds or signs.
 The template is never registered with Launch Services or launched. Each site
 app creates the runtime directories it needs; the CLI never assumes they

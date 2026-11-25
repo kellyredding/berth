@@ -18,11 +18,13 @@ enum CLIError: LocalizedError {
 }
 
 /// Runs the berth CLI. The app never reads or writes the config itself; its
-/// site's settings arrive through `berth config export`.
+/// site's settings arrive through `berth config export`. Every run gets the
+/// app's own environment with CLIEnvironment's PATH.
 final class CLIRunner: @unchecked Sendable {
     let paths: BerthPaths
     let site: String
     private let runner = ProcessRunner(defaultTimeout: 10)
+    private let environment = CLIEnvironment.child(of: ProcessInfo.processInfo.environment)
 
     init(paths: BerthPaths, site: String) {
         self.paths = paths
@@ -46,7 +48,7 @@ final class CLIRunner: @unchecked Sendable {
     private func run(_ arguments: [String], timeout: TimeInterval? = nil) async throws -> Data {
         guard let binary else { throw CLIError.missing(paths.binaryCandidates.map(\.path)) }
         do {
-            return try await runner.run(executable: binary, arguments: arguments, timeout: timeout)
+            return try await runner.run(executable: binary, arguments: arguments, timeout: timeout, environment: environment)
         } catch {
             throw CLIError.failed(error.localizedDescription)
         }

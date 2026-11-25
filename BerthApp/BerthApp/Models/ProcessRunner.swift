@@ -11,15 +11,19 @@ final class ProcessRunner: @unchecked Sendable {
         self.defaultTimeout = defaultTimeout
     }
 
+    /// `environment` replaces the child's whole environment; nil inherits
+    /// this process's.
     func run(
         executable: URL,
         arguments: [String],
-        timeout: TimeInterval? = nil
+        timeout: TimeInterval? = nil,
+        environment: [String: String]? = nil
     ) async throws -> Data {
         try await withCheckedThrowingContinuation { continuation in
             Self.drive(
                 executable: executable,
                 arguments: arguments,
+                environment: environment,
                 timeout: timeout ?? defaultTimeout,
                 completion: { continuation.resume(with: $0) }
             )
@@ -29,6 +33,7 @@ final class ProcessRunner: @unchecked Sendable {
     private static func drive(
         executable: URL,
         arguments: [String],
+        environment: [String: String]?,
         timeout limit: TimeInterval,
         completion: @escaping (Result<Data, Error>) -> Void
     ) {
@@ -37,6 +42,7 @@ final class ProcessRunner: @unchecked Sendable {
         let errPipe = Pipe()
         process.executableURL = executable
         process.arguments = arguments
+        if let environment { process.environment = environment }
         process.standardOutput = outPipe
         process.standardError = errPipe
         process.standardInput = FileHandle.nullDevice

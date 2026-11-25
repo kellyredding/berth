@@ -606,6 +606,28 @@ do {
 } catch {
     check("a missing binary fails to launch", (error as? ProcessRunError).map { if case .launchFailed = $0 { return true }; return false } ?? false)
 }
+let given = try? await runner.run(executable: URL(fileURLWithPath: "/bin/sh"), arguments: ["-c", "printf '%s|%s' \"$PATH\" \"$BERTH_ROOT\""],
+                                  environment: ["PATH": "/opt/homebrew/bin:/usr/bin", "BERTH_ROOT": "/tmp/b"])
+check("a subprocess gets the environment it is given",
+      given.map { String(decoding: $0, as: UTF8.self) } == "/opt/homebrew/bin:/usr/bin|/tmp/b")
+
+// MARK: - The CLI's environment
+
+check("from the Dock, the CLI's PATH finds Homebrew first, then the system",
+      CLIEnvironment.path(inherited: "/usr/bin:/bin:/usr/sbin:/sbin") == "/opt/homebrew/bin:/usr/local/bin:/usr/bin:/bin:/usr/sbin:/sbin")
+check("an inherited PATH keeps its order between Homebrew's and the system's",
+      CLIEnvironment.path(inherited: "/Users/someone/.local/bin:/usr/local/bin:/opt/x/bin")
+        == "/opt/homebrew/bin:/usr/local/bin:/Users/someone/.local/bin:/opt/x/bin:/usr/bin:/bin:/usr/sbin:/sbin")
+check("no inherited PATH, or empty parts, still gives the whole PATH",
+      CLIEnvironment.path(inherited: nil) == "/opt/homebrew/bin:/usr/local/bin:/usr/bin:/bin:/usr/sbin:/sbin"
+        && CLIEnvironment.path(inherited: "::") == CLIEnvironment.path(inherited: nil))
+let childEnvironment = CLIEnvironment.child(of: ["PATH": "/usr/bin:/bin", "HOME": "/Users/someone", "BERTH_ROOT": "/tmp/b",
+                                                 "BERTH_CONFIG": "/tmp/c.json", "BERTH_BINARY": "/tmp/bin/berth"])
+check("the CLI gets the app's BERTH_* paths and the rest of its environment",
+      childEnvironment["BERTH_ROOT"] == "/tmp/b" && childEnvironment["BERTH_CONFIG"] == "/tmp/c.json"
+        && childEnvironment["BERTH_BINARY"] == "/tmp/bin/berth" && childEnvironment["HOME"] == "/Users/someone"
+        && childEnvironment["PATH"] == "/opt/homebrew/bin:/usr/local/bin:/usr/bin:/bin:/usr/sbin:/sbin"
+        && childEnvironment.count == 5)
 
 // MARK: - Reload coalescing
 
