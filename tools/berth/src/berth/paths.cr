@@ -42,6 +42,15 @@ module Berth
       root / "installed-manifest.json"
     end
 
+    # Where install.sh puts the CLI, whatever BERTH_BINARY says.
+    def installed_cli : Path
+      root / "bin" / "berth"
+    end
+
+    def installed_sign_script : Path
+      root / "libexec" / "sign-app.sh"
+    end
+
     def applications_dir : Path
       env_path("BERTH_APPLICATIONS_DIR") || Path.home / "Applications"
     end
@@ -90,7 +99,7 @@ module Berth
       end
       candidates = [] of Path
       checkout_root.try { |repo| candidates << repo / "bin" / "lib" / "sign-app.sh" }
-      candidates << root / "libexec" / "sign-app.sh"
+      candidates << installed_sign_script
       candidates
     end
 

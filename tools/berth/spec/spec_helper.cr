@@ -201,16 +201,52 @@ module SpecHelper
     app
   end
 
-  # A site app as `berth sites build` leaves it, signed by `signer`.
+  # A site app as `berth sites build` leaves it, signed by `signer`, with
+  # the build commit of the template it was copied from.
   def write_site_app(app : Path, site : String, bundle_id : String = "com.kellyredding.berth.#{site}",
-                     signer : String? = "Berth Release Signing") : Path
+                     signer : String? = "Berth Release Signing", commit : String? = nil) : Path
     write_bundle(app, <<-XML)
       <key>CFBundleIdentifier</key><string>#{bundle_id}</string>
       <key>BerthSite</key><string>#{site}</string>
       <key>CFBundleShortVersionString</key><string>0.1.0</string>
+      #{commit.try { |value| "<key>BerthBuildCommit</key><string>#{value}</string>" }}
       XML
-    signer.try { |name| File.write((app / "Contents" / ".fake-signature").to_s, "#{name}\n#{bundle_id}\n") }
+    sign(app, signer, bundle_id)
+  end
+
+  # Marks a bundle as the fake codesign reports it; nil leaves it unsigned.
+  def sign(app : Path, signer : String?, identifier : String) : Path
+    signer.try { |name| File.write((app / "Contents" / ".fake-signature").to_s, "#{name}\n#{identifier}\n") }
     app
+  end
+
+  # An install as install.sh leaves it under the sandbox's root: the CLI, the
+  # template (build commit abc123def456), sign-app.sh and the record. Returns
+  # the record's fields, which `manifest` overrides.
+  def write_install(sandbox : Sandbox, manifest : Hash(String, String | Bool) = {} of String => String | Bool,
+                    template_signer : String? = "Berth Release Signing") : Hash(String, String | Bool)
+    cli = write_executable(sandbox.root / "bin" / "berth", "#!/bin/sh\necho installed berth\n")
+    sandbox.write_template
+    sign(sandbox.template, template_signer, "com.kellyredding.berth")
+    write_executable(sandbox.root / "libexec" / "sign-app.sh", "#!/bin/sh\n")
+    record = {
+      "version"      => "0.1.0",
+      "commit"       => "abc123def456",
+      "dirty"        => false,
+      "built_at"     => "2026-01-02T03:04:05Z",
+      "signing"      => "op",
+      "signer"       => "Berth Release Signing",
+      "berth_sha256" => sha256(cli),
+    } of String => String | Bool
+    record.merge!(manifest)
+    File.write((sandbox.root / "installed-manifest.json").to_s, record.to_pretty_json)
+    record
+  end
+
+  def sha256(path : Path) : String
+    output = IO::Memory.new
+    Process.run("/usr/bin/shasum", ["-a", "256", path.to_s], output: output)
+    output.to_s.split.first
   end
 
   # An app's Info.plist as JSON.

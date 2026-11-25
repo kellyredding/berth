@@ -5,20 +5,27 @@ module Berth
       extend self
 
       HELP = <<-TEXT
-        berth doctor — check the CLI, the config and each site's app
+        berth doctor — check the CLI, the install, the config and each site's app
 
         Reports the CLI version; the config path, where its symlink resolves,
         whether it is a file or the built-in starter, and whether it is valid
-        JSON and a valid config, with its warnings. Then, for each site, its
-        app at ~/Applications/NAME.app: whether it is built and names this
-        site, whether it is signed by Berth Release Signing, whether Launch
-        Services knows it (and any other copy registered under its bundle
-        identifier), and whether it is running. Exits 1 when a check fails.
+        JSON and a valid config, with its warnings.
 
-        The install record and the template app are not checked yet.
+        Then the install record install.sh leaves at
+        ~/.berth/installed-manifest.json (version, commit, build time, signer)
+        and, when there is one: whether ~/.berth/bin/berth is that build (its
+        checksum); whether the template ~/.berth/template/Berth.app is that
+        build and signed by that signer, and that Launch Services does not know
+        it; and whether ~/.berth/libexec/sign-app.sh is there.
+
+        Then, for each site, its app at ~/Applications/NAME.app: whether it is
+        built and names this site, whether it was built from the installed
+        template (else rebuild with `berth sites build --all`), whether it is
+        signed by Berth Release Signing, whether Launch Services knows it (and
+        any other copy registered under its bundle identifier), and whether it
+        is running. Exits 1 when a check fails; no install record, as in a
+        checkout, is a warning.
         TEXT
-
-      PENDING = "install record and template checks are not built yet"
 
       enum Level
         Ok
@@ -54,14 +61,22 @@ module Berth
         checks = [Check.new(Level::Ok, "cli", "berth #{VERSION}")]
         model = nil
         config = config_checks(checks) { |valid| model = valid }
-        checks << Check.new(Level::Info, "install", PENDING)
-        apps = model.try { |valid| SiteAppChecks.run(valid, checks) } || [] of SiteAppChecks::Report
+        registrations = begin
+          MacOS::LaunchServices.registrations
+        rescue error : Error
+          checks << Check.new(Level::Warn, "launch services", "could not read its registrations: #{error.message}")
+          nil
+        end
+        install = InstallChecks.run(checks, registrations)
+        apps = model.try { |valid| SiteAppChecks.run(valid, checks, registrations, install.template_commit) } ||
+               [] of SiteAppChecks::Report
 
         if args.json?
           Support.print_json do |json|
             json.object do
               json.field "ok", checks.none?(&.level.fail?)
               json.field("cli") { json.object { json.field "version", VERSION } }
+              json.field "install", install
               json.field("config") { config.call(json) }
               json.field "sites", apps
               json.field "checks", checks

@@ -1,8 +1,9 @@
 module Berth
   module Commands
     module Doctor
-      # Each configured site's app: built and stamped for this site, signed
-      # with the release identity, known to Launch Services, and running.
+      # Each configured site's app: built and stamped for this site, from the
+      # installed template, signed with the release identity, known to Launch
+      # Services, and running.
       module SiteAppChecks
         extend self
 
@@ -14,6 +15,7 @@ module Berth
           bundle_id : String?,
           berth_site : String?,
           version : String?,
+          commit : String?,
           signer : String?,
           signature : String?,
           registered : Bool?,
@@ -28,6 +30,7 @@ module Berth
               json.field "bundle_id", bundle_id
               json.field "berth_site", berth_site
               json.field "version", version
+              json.field "commit", commit
               json.field "signer", signer
               json.field "signature", signature
               json.field "registered", registered
@@ -37,24 +40,21 @@ module Berth
           end
         end
 
-        def run(model : Config::Model, checks : Array(Check)) : Array(Report)
-          registrations = begin
-            MacOS::LaunchServices.registrations
-          rescue error : Error
-            checks << Check.new(Level::Warn, "launch services", "could not read its registrations: #{error.message}")
-            nil
-          end
+        # `template_commit` is the installed template's build commit, nil when
+        # there is no install to compare a site app with.
+        def run(model : Config::Model, checks : Array(Check),
+                registrations : Array(MacOS::LaunchServices::Registration)?, template_commit : String?) : Array(Report)
           registrations.try do |found|
             MacOS::LaunchServices.development_copies(found).each do |path|
               checks << Check.new(Level::Warn, "launch services",
                 "a development build is registered at #{path}; `berth sites build` unregisters it")
             end
           end
-          model.sites.map { |site| check(site, registrations, checks) }
+          model.sites.map { |site| check(site, registrations, template_commit, checks) }
         end
 
         private def check(site : Config::Site, registrations : Array(MacOS::LaunchServices::Registration)?,
-                          checks : Array(Check)) : Report
+                          template_commit : String?, checks : Array(Check)) : Report
           app = site.app
           link_target = File.symlink?(app.to_s) ? File.readlink(app.to_s) : nil
           built = Dir.exists?(app.to_s)
@@ -69,14 +69,16 @@ module Berth
             checks << Check.new(Level::Warn, "#{site.id} app", "not built: no #{app}; run `berth sites build #{site.id}`")
             others.each { |path| checks << other_copy(site, path) }
             checks << Check.new(Level::Ok, "#{site.id} running", running) if running
-            return Report.new(site.id, app.to_s, false, link_target, nil, nil, nil, nil, nil, nil, others, !running.nil?)
+            return Report.new(site.id, app.to_s, false, link_target, nil, nil, nil, nil, nil, nil, nil, others, !running.nil?)
           end
 
           plist = MacOS::InfoPlist.new(app)
           bundle_id = plist["CFBundleIdentifier"]
           berth_site = plist["BerthSite"]
           version = plist["CFBundleShortVersionString"]
-          if bundle_id == site.bundle_id && berth_site == site.id
+          commit = plist["BerthBuildCommit"]
+          ours = bundle_id == site.bundle_id && berth_site == site.id
+          if ours
             detail = "#{app}: #{bundle_id}#{version.try { |value| ", version #{value}" }}"
             if link_target
               checks << Check.new(Level::Warn, "#{site.id} app",
@@ -88,6 +90,9 @@ module Berth
             checks << Check.new(Level::Fail, "#{site.id} app",
               "#{app} is not #{site.id}'s app: its bundle identifier is #{bundle_id || "missing"} and BerthSite " \
               "#{berth_site || "missing"}, not #{site.bundle_id} and #{site.id}")
+          end
+          if ours && template_commit
+            checks << build_check(site, commit, template_commit)
           end
 
           signature = MacOS::Signature.read(app)
@@ -105,8 +110,20 @@ module Berth
           others.each { |path| checks << other_copy(site, path) }
           checks << Check.new(running ? Level::Ok : Level::Info, "#{site.id} running", running || "not running")
 
-          Report.new(site.id, app.to_s, true, link_target, bundle_id, berth_site, version,
+          Report.new(site.id, app.to_s, true, link_target, bundle_id, berth_site, version, commit,
             signature.signer, signature.kind, registered, others, !running.nil?)
+        end
+
+        # A site app keeps the template's BerthBuildCommit, so it names the
+        # template it was copied from.
+        private def build_check(site : Config::Site, commit : String?, template_commit : String) : Check
+          name = "#{site.id} build"
+          if commit == template_commit
+            Check.new(Level::Ok, name, "from the installed template (#{commit})")
+          else
+            Check.new(Level::Warn, name, "built from #{commit ? "the template at #{commit}" : "a template with no build commit"}, " \
+                                         "not the installed one (#{template_commit}); rebuild with `berth sites build --all`")
+          end
         end
 
         private def signer_check(site : Config::Site, signature : MacOS::Signature) : Check

@@ -1,27 +1,7 @@
 require "../spec_helper"
 
-describe "commands that are not built yet" do
-  it "fail with exit 1 saying so, and still show their help" do
-    SpecHelper.sandbox do |sandbox|
-      {
-        ["update", "--local"]                         => "update is not built yet",
-        ["update", "--version", "0.1.0", "--preview"] => "update is not built yet",
-      }.each do |args, message|
-        result = SpecHelper.run(sandbox, args + ["--json"])
-        result.exit_code.should eq(1), "#{args.join(" ")} exited #{result.exit_code}: #{result.stderr}"
-        result.stderr.should contain(message)
-        result.json["ok"].should eq(false)
-
-        help = SpecHelper.run(sandbox, args + ["--help"])
-        help.exit_code.should eq(0)
-        help.stdout.should contain("Not built yet")
-      end
-    end
-  end
-end
-
 describe "berth doctor" do
-  it "checks the config, says each site's app is not built, and what it does not check yet" do
+  it "checks the config, warns that there is no install record, and says each site's app is not built" do
     SpecHelper.sandbox do |sandbox|
       result = SpecHelper.run(sandbox, ["doctor"])
       result.exit_code.should eq(0)
@@ -29,7 +9,7 @@ describe "berth doctor" do
         ok    cli          berth #{Berth::VERSION}
         ok    config path  #{sandbox.config} (missing: using the built-in starter)
         ok    config       valid: 2 sites (docs, mail)
-        info  install      install record and template checks are not built yet
+        warn  install      no install record at #{sandbox.root}/installed-manifest.json; `berth update` installs a release and writes one
         warn  docs app     not built: no #{sandbox.applications}/Docs.app; run `berth sites build docs`
         warn  mail app     not built: no #{sandbox.applications}/Mail.app; run `berth sites build mail`
 
@@ -38,7 +18,8 @@ describe "berth doctor" do
       json = SpecHelper.run(sandbox, ["doctor", "--json"]).json
       json["ok"].should eq(true)
       json["config"]["source"].should eq("starter")
-      json["checks"].as_a.map(&.["level"].as_s).should eq(["ok", "ok", "ok", "info", "warn", "warn"])
+      json["install"]["manifest"].raw.should be_nil
+      json["checks"].as_a.map(&.["level"].as_s).should eq(["ok", "ok", "ok", "warn", "warn", "warn"])
       json["sites"][0]["built"].should eq(false)
       json["sites"][0]["running"].should eq(false)
     end

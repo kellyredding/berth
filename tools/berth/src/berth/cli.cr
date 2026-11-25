@@ -23,7 +23,7 @@ module Berth
         signin SITE [--account NAME]    Fill a running app's sign-in from 1Password
 
       Health:
-        doctor                          Check the config and each site's app
+        doctor                          Check the install, the config and each site's app
         version                         Print the version
         update [--version X.Y.Z | --local [PATH]] [--preview] [--force]
 
