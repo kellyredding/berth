@@ -37,6 +37,18 @@ git-tracked files only**, so a new file is invisible to it until staged:
 stage first, then audit. A leak that reaches a commit cannot be undone by a
 later commit, so run it before committing.
 
+The audit (`scripts/check-disclosure.sh`) has two layers: structural patterns
+that describe the shape of a leak (an email address off `example.*`, an
+`op://` reference to a vault that is not a placeholder, a 1Password-style
+ID, a `/Users/<name>` path, a real host in a fixture or the starter config),
+and a literal denylist kept outside the repository, since committing it
+would be the leak: `BERTH_DENYLIST`, else `~/.berth/denylist.txt`, one term
+per line, ignoring case, `#` for comments. It prints only the file and line
+of a match, never the text. Without a denylist it refuses; on a fresh clone,
+`BERTH_ALLOW_NO_DENYLIST=1 make check` accepts the structural layer alone.
+`scripts/check-disclosure.sh --file PATH…` audits generated text, such as
+release notes, before it is published.
+
 ## Branches and releases
 
 - Work lands on `development`. Feature branches
@@ -54,7 +66,8 @@ later commit, so run it before committing.
 ## Building and checking
 
 ```bash
-make check       # CLI: lint + build + specs
+make check       # disclosure audit, then CLI: lint + build + specs
+make audit       # the disclosure audit alone
 make app-check   # app: build + smoke (BerthApp/Makefile's check)
 ```
 

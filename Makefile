@@ -1,10 +1,18 @@
-.PHONY: all check build dev test lint format clean \
+.PHONY: all audit check build dev test lint format clean \
         cli-build cli-check cli-dev cli-test cli-lint cli-format cli-install cli-clean \
         app-check
 
 APP_DIR := BerthApp
 
 all: cli-build
+
+# --- Disclosure audit ---
+
+# Refuses personal details in tracked files. Part of `check` rather than an
+# optional extra: a leak cannot be undone by a later commit, so the only
+# useful time to catch one is before it is committed.
+audit:
+	./scripts/check-disclosure.sh
 
 # --- Crystal CLI ---
 
@@ -34,9 +42,11 @@ endif
 build: cli-build
 clean: cli-clean
 
-# `check` is the CLI's gate and `app-check` the app's; a change touching both
-# sides needs both. Delegated rather than restated, so the steps cannot drift.
-check:  cli-check
+# `check` is the audit and the CLI's gate, and `app-check` the app's; a change
+# touching both sides needs both. Delegated rather than restated, so the steps
+# cannot drift.
+check:  audit
+	$(MAKE) cli-check
 dev:    cli-dev
 test:   cli-test
 lint:   cli-lint

@@ -70,11 +70,17 @@ it with the CLI, or by hand followed by `berth config validate`.
 ## Development
 
 ```bash
-make check       # CLI gate: lint, build, specs
+make check       # disclosure audit, then the CLI gate: lint, build, specs
 make app-check   # app gate: build and the smoke check
 ```
 
 `make check` does not build the app; a change touching both needs both.
+
+The repository is public, so `make audit` (run first by `make check`)
+refuses personal details in tracked files: structural patterns, plus a list
+of your own terms kept outside the repository in `~/.berth/denylist.txt` (or
+`BERTH_DENYLIST`), one per line. On a fresh clone without one,
+`BERTH_ALLOW_NO_DENYLIST=1 make check` runs the structural checks alone.
 
 Signing reads the identity from 1Password through two variables you set in
 your own shell profile, `BERTH_SIGNING_OP_ACCOUNT` (the account's sign-in

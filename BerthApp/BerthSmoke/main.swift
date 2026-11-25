@@ -146,7 +146,7 @@ check("no host is not kept", !keep.keeps(host: nil) && !keep.keeps(host: ""))
 check("the port is ignored", keep.keeps(URL(string: "https://mail.example.com:8443/inbox")!))
 check("http on a kept host is kept", keep.keeps(URL(string: "http://mail.example.com/")!))
 check("a non-web scheme is never kept", !keep.keeps(URL(string: "ftp://mail.example.com/")!))
-check("userinfo cannot smuggle a host", !keep.keeps(URL(string: "https://mail.example.com@evil.net/")!))
+check("userinfo cannot smuggle a host", !keep.keeps(URL(string: "https://mail.example.com@evil.example.net/")!))
 check("an empty keep keeps nothing", !KeepList([]).keeps(host: "mail.example.com"))
 
 func url(_ text: String) -> URL { URL(string: text)! }
