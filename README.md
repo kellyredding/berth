@@ -23,6 +23,49 @@ handle `mailto:` links, and sign in from 1Password.
 
 `docs/contract.md` is everything the two must agree on.
 
+## Install
+
+Apple Silicon, macOS 26 or later:
+
+```bash
+curl -fsSL https://raw.githubusercontent.com/kellyredding/berth/main/install.sh | bash
+```
+
+Use the script, not a browser download: the apps are self-signed, and a
+download through a browser is quarantined. It installs the CLI at
+`~/.berth/bin/berth` (linked onto `~/.local/bin`), the template app at
+`~/.berth/template/Berth.app` and its signing script, and never touches your
+config, `~/Applications` or a site app.
+
+## Building your site apps
+
+Each site in your config becomes its own app, copied from the template and
+signed with the Berth release identity, which lives in 1Password:
+
+```bash
+export BERTH_SIGNING_OP_ACCOUNT='<account>.1password.com'   # in your shell profile
+export BERTH_SIGNING_OP_ITEM='op://<vault>/<item>'
+berth sites build --all
+```
+
+One 1Password approval covers every app in the build. A site app keeps one
+signature across rebuilds, so macOS keeps its notification permission and
+login item. A running app keeps its old build until you restart it.
+
+## Update
+
+```bash
+berth update            # the latest release, then every site app rebuilt
+berth update --preview  # what would change
+```
+
+`--version X.Y.Z` installs that release, `--no-sites` skips the rebuild, and
+`--local [PATH]` packages and installs a Berth checkout. Without the two
+signing variables the update still installs, and says to set them and run
+`berth sites build --all`. `berth doctor` checks the install: the CLI and the
+template against the install record, and whether each site app was built from
+the installed template.
+
 ## Config
 
 `~/.berth/config.json`, or `BERTH_CONFIG`. It may be a symlink, for example
@@ -89,6 +132,10 @@ Signing reads the identity from 1Password through two variables you set in
 your own shell profile, `BERTH_SIGNING_OP_ACCOUNT` (the account's sign-in
 address or ID) and `BERTH_SIGNING_OP_ITEM` (`op://<vault>/<item>`). Berth
 has no defaults for them; see `docs/contract.md`.
+
+`bin/package` builds the release archive (the CLI, the template and the
+signing script), `bin/release` publishes it from `main`, and `release-notes/`
+holds each version's notes.
 
 ## License
 

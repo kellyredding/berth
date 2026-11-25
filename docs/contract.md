@@ -130,6 +130,118 @@ registered is unregistered.
 - **A running app** keeps its old build until it is restarted. The CLI never
   launches, quits or restarts one.
 
+Because a site app keeps the template's `BerthBuildCommit`, it names the
+template it was copied from; `berth doctor` compares that with the installed
+template's ("Releases and installs").
+
+## Releases and installs
+
+### The archive
+
+`bin/package` writes `berth-darwin-arm64.tar.gz` and its
+`berth-darwin-arm64.tar.gz.sha256` (`shasum -a 256` output). The archive holds
+one directory, `berth/`:
+
+| Path | What |
+|---|---|
+| `bin/berth` | The CLI, a release build that links only `/usr/lib` libraries (`otool -L`), built for macOS 26, signed with the identifier `com.kellyredding.berth-cli` |
+| `Berth.app` | The template: a Release build for macOS 14 and later, bundle identifier `com.kellyredding.berth`, no `BerthSite`, stamped with `CFBundleShortVersionString` (from `VERSION`), `BerthBuildCommit`, `BerthBuildDirty` and `BerthBuiltAt` |
+| `libexec/sign-app.sh` | `bin/lib/sign-app.sh`, which an installed `berth sites build` runs |
+| `manifest.json` | The build record, below |
+| `VERSION` | The version |
+
+Both `bin/berth` and `Berth.app` are signed by the release certificate,
+`Berth Release Signing` (`--sign op`, the default). `--sign adhoc` is allowed
+only with `--local`, to check packaging; `install.sh` refuses its archive.
+
+`manifest.json`, one key per line:
+
+```json
+{
+  "version": "0.1.0",
+  "commit": "0123456789ab",
+  "dirty": false,
+  "built_at": "2026-01-02T03:04:05Z",
+  "signing": "op",
+  "signer": "Berth Release Signing",
+  "berth_sha256": "…"
+}
+```
+
+`commit` is the 12-character commit the template's `BerthBuildCommit` also
+holds; `dirty` is whether the tree had uncommitted changes (`--local` only);
+`signer` is the certificate's common name, or `ad hoc`; `berth_sha256` is
+`bin/berth`'s checksum. It names no 1Password account, vault or item.
+
+### `install.sh`
+
+Run as `curl -fsSL …/main/install.sh | bash`, or by `berth update`, with
+`--version X.Y.Z`, `--from ARCHIVE`, `--preview` or `--force`. It is one
+`{ … }` block, so a truncated download runs none of it.
+
+1. Refuses anything but Apple Silicon on macOS 26 or later.
+2. Downloads the latest release's archive and checksum with `curl` (no
+   quarantine flag), or `--version`'s, or copies `--from ARCHIVE` and its
+   `ARCHIVE.sha256`, rewriting the file name in the checksum so an archive
+   saved under another name still verifies. A checksum mismatch installs
+   nothing.
+3. Refuses an archive whose `Berth.app` or `bin/berth` does not verify or is
+   not signed by `Berth Release Signing`, or whose `Berth.app` is not the
+   template, before anything is replaced.
+4. A release whose `commit` is the install record's, clean, is up to date
+   unless `--force`; `--from` always installs.
+5. Installs, under the root (`BERTH_ROOT`, else `~/.berth`):
+
+| Path | What |
+|---|---|
+| `<root>/bin/berth` | The CLI, moved into place over the old one; `~/.local/bin/berth` links to it |
+| `<root>/template/Berth.app` | The template, staged beside it as `.Berth.app.berth-new` and swapped in by rename; a link there is removed, never its target |
+| `<root>/libexec/sign-app.sh` | The signing script |
+| `<root>/installed-manifest.json` | The archive's `manifest.json`, written last, so a record names only an install that finished |
+
+The template is never registered with Launch Services: any registration of
+it, or of anything beside it, is removed (`lsregister -u`; `BERTH_LSREGISTER`
+overrides the tool). It never touches the config, the denylist,
+`~/Applications` or any site app, and never launches or quits anything. It
+ends by saying that site apps are rebuilt from the new template with `berth
+sites build --all` (signing needs `BERTH_SIGNING_OP_ACCOUNT`,
+`BERTH_SIGNING_OP_ITEM` and one 1Password approval) and that running site
+apps keep their old build until restarted; `berth update`, which rebuilds them
+itself, sets `BERTH_INSTALL_FROM_UPDATE` to leave out the first part.
+
+### `berth update [--version X.Y.Z | --local [PATH]] [--preview] [--force] [--no-sites]`
+
+- A release: downloads `install.sh` from `main` into memory with `curl`, and
+  runs it with `bash -s --` only if the download succeeded (piped straight
+  into bash, a failed download would be an empty script that exits 0).
+- `--local [PATH]`: the Berth checkout at `PATH`, else the one the working
+  directory is in (it has `bin/package`, `install.sh` and
+  `BerthApp/project.yml`): its `bin/package --local --out TMP`, which signs
+  with the release identity, then its `install.sh --from TMP/<archive>`.
+- An installer or packager that fails ends the update with its exit code (128
+  plus the signal when one ended it).
+- Then, unless `--preview` or `--no-sites`, when the install record changed
+  and the config has sites: the newly installed CLI, `<root>/bin/berth`, runs
+  `sites build --all` as a child, and its exit code is the update's. Without
+  the two signing variables it builds nothing, exits 0, and says to set them
+  and run `berth sites build --all`; it never signs ad hoc. It never restarts
+  a site app; the build names each running one, which keeps its old build.
+- It has no `--json` output.
+
+### `berth doctor`'s install checks
+
+With an install record (none, as in a checkout, is a warning):
+
+| Check | Fails when |
+|---|---|
+| `install` | — (reports version, commit, build time, signer) |
+| `installed cli` | `<root>/bin/berth` is missing or its `/usr/bin/shasum` checksum is not `berth_sha256` (a record without one warns) |
+| `template` | `<root>/template/Berth.app` is missing, a link, not the template, or its `BerthBuildCommit` is missing or not the record's `commit` |
+| `template signer` | Its signature does not verify, is ad hoc, or is not the record's `signer` |
+| `template registered` | Warns for each registration of the template, or of anything beside it |
+| `sign script` | `<root>/libexec/sign-app.sh` is missing or not executable |
+| `SITE build` | Warns when a built site app's `BerthBuildCommit` is not the installed template's: rebuild with `berth sites build --all` |
+
 ## Config file (JSON, read and written only by the CLI)
 
 ```json

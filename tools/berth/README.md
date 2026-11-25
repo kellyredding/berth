@@ -84,11 +84,25 @@ export BERTH_SIGNING_OP_ITEM='op://<vault>/<item>'          # the identity's ite
 Without either, or with an item that is not `op://VAULT/ITEM`, the build
 refuses (exit 2) before copying anything. `--sign adhoc` needs neither.
 
-**Health:** `doctor` checks the config and, for each site, its app: built and
-stamped for the site, signed by the release certificate, Berth Release
-Signing (ad hoc warns), known to Launch Services (another registered copy,
-or a development build, warns), and running. The install record and template checks are not built yet.
-`version`; `update` is not built yet.
+**Health:** `doctor` checks the config; the install, against the record
+install.sh leaves (`~/.berth/installed-manifest.json`): the installed CLI's
+checksum, the template's build commit and signer, that Launch Services does
+not know the template, and that `libexec/sign-app.sh` is there (no record, as
+in a checkout, warns); and, for each site, its app: built and stamped for the
+site, built from the installed template (else rebuild with `berth sites build
+--all`), signed by the release certificate, Berth Release Signing (ad hoc
+warns), known to Launch Services (another registered copy, or a development
+build, warns), and running. `version` prints the version.
+
+**Updating:** `update [--version X.Y.Z | --local [PATH]] [--preview] [--force]
+[--no-sites]` downloads `install.sh` from the repository's `main` into memory
+and runs it only when the download succeeded (`--local` runs a checkout's
+`bin/package --local`, then its `install.sh --from`). When that installed
+something, the newly installed CLI runs `sites build --all`, signing every
+site app with one 1Password approval; without the signing variables it
+installs and says to run that build once they are set. It never signs ad hoc
+and never restarts a site app. It has no `--json`; it exits with the
+installer's, packager's or build's exit code when one fails.
 
 Run `berth <command> --help` for each command's options.
 
@@ -124,7 +138,9 @@ directory.
 | Root | `~/.berth` | `BERTH_ROOT` |
 | Config | `<root>/config.json` | `BERTH_CONFIG` |
 | Runtime dir | `<root>/runtime` | `BERTH_RUNTIME_DIR` |
-| CLI binary | `<root>/bin/berth` | `BERTH_BINARY` |
+| CLI binary | `<root>/bin/berth` | `BERTH_BINARY` (for the apps; install.sh and `doctor` always use `<root>/bin/berth`) |
+| Template | `<root>/template/Berth.app` | — |
+| Install record | `<root>/installed-manifest.json` | — |
 | Site apps | `~/Applications` | `BERTH_APPLICATIONS_DIR` |
 | The program that launches an app | `/usr/bin/open` | `BERTH_OPEN` |
 | 1Password's CLI | `op` on `PATH` | `BERTH_OP` |

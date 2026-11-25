@@ -63,6 +63,36 @@ release notes, before it is published.
 - The version lives only in `VERSION`. The CLI reads it at compile time and
   `bin/package` stamps it into the app; never type a version anywhere else.
 
+## Releasing and installing
+
+`docs/contract.md`, "Releases and installs", has the archive, the manifest,
+the install layout and what `update` and `doctor` do.
+
+- **A release:** an agent drafts `release-notes/vX.Y.Z.md` (see
+  `release-notes/README.md`) and the `VERSION` bump as the last commit on
+  `development`; Kelly fast-forwards `main`, pushes it, and runs `bin/release
+  --dry-run`, reads the printed description, then `bin/release`. It refuses
+  off `main`, when `main` is not `origin/main`, on a dirty tree, without the
+  notes, when the tag points elsewhere, and when `BERTH_ALLOW_NO_DENYLIST` is
+  set; it runs `make check` (the audit with the real denylist) and `make
+  app-check`, packages with `--sign op`, verifies the archive, and audits the
+  notes and the generated description with `scripts/check-disclosure.sh
+  --file` before tagging or printing anything. A rerun after a dry run of the
+  same commit reuses its archive; `--fresh` rebuilds.
+- **`bin/package [--local] [--sign op|adhoc] [--out DIR]`** builds the CLI and
+  the template, stamps them, signs both through `bin/lib/sign-app.sh` and
+  writes the archive to `dist/` (ignored). `--sign op` is the default and
+  needs the signing variables; it never falls back to ad hoc. It refuses a CLI
+  that links anything outside `/usr/lib`. `--local --sign adhoc` checks
+  packaging only: `install.sh` refuses that archive.
+- **Development installs** go through the signed package path, never a link
+  to a build: `berth update --local [PATH]` packages the checkout, installs it
+  and rebuilds every site app, which Kelly approves in 1Password.
+- **Agents never run** `bin/release` without `--dry-run`, a real `berth
+  update`, or `bin/package --sign op`. Check the installer against an ad-hoc
+  archive in a sandboxed `HOME`, with `BERTH_LSREGISTER` pointing at a
+  stand-in, and delete the sandbox afterwards.
+
 ## Building and checking
 
 ```bash
@@ -124,11 +154,13 @@ with exit 2. Specs set placeholder values and use the fake signing script.
 
 - Launch, quit or sign in to a site app unless asked. Reading (`berth sites
   list`, `berth config export --json`, `berth status`) is always fine.
-- Touch `~/.berth`, `~/Applications` or the Launch Services database from
-  specs or checks: every path has an environment override (`BERTH_ROOT`,
-  `BERTH_CONFIG`, `BERTH_RUNTIME_DIR`, `BERTH_BINARY`,
+- Touch `~/.berth`, `~/Applications`, the network or the Launch Services
+  database from specs or checks: every path has an environment override
+  (`BERTH_ROOT`, `BERTH_CONFIG`, `BERTH_RUNTIME_DIR`, `BERTH_BINARY`,
   `BERTH_APPLICATIONS_DIR`), and so does every tool a build runs
   (`BERTH_SIGN_SCRIPT`, `BERTH_CODESIGN`, `BERTH_SIPS`, `BERTH_ICONUTIL`,
-  `BERTH_LSREGISTER`).
+  `BERTH_LSREGISTER`). `update` specs put stand-ins for `curl` and a
+  checkout's `bin/package` and `install.sh` on `PATH` or in a scratch
+  repository.
 - Run `op` from specs, or put a secret in a spec, a log, a file or argv.
   Sign-in secrets travel only from `op`'s output to a site app's socket.
