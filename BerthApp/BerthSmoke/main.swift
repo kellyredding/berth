@@ -529,6 +529,24 @@ check("google: a page with no field stops after the arrival time", chooser.next(
       == .finish(SigninOutcome(completed: [], stoppedAt: SigninStop(step: 0, flow: "google",
           reason: "the page didn't match the google username step: no username field"), alreadySignedIn: false)))
 
+check("a sign-in starting at google on google's page fills it where it is",
+      !SigninStart.reloadFirst(firstFlow: .google, host: "accounts.google.com"))
+check("a sign-in starting at google on an okta page goes back to the site first",
+      SigninStart.reloadFirst(firstFlow: .google, host: "example.okta.com"))
+check("a sign-in on the site itself goes back to the start too, which finds it signed in",
+      SigninStart.reloadFirst(firstFlow: .google, host: "mail.example.com"))
+check("a sign-in starting at okta on okta's page stays", !SigninStart.reloadFirst(firstFlow: .okta, host: "example.okta.com"))
+
+var remembered = SigninRun(steps: [.init(flow: .google, hasPassword: false, hasCode: false),
+                                   .init(flow: .okta, hasPassword: true, hasCode: true)], siteHost: "mail.example.com", start: t0)
+check("a remembered account: the chooser is clicked", remembered.next(googlePage(), now: at(1)) == .choose)
+remembered.choseAccount()
+check("a remembered account: leaving google for okta waits to settle", remembered.next(oktaThroughGoogle, now: at(2)) == .wait)
+check("a remembered account: then google counts as done and okta takes over",
+      remembered.next(oktaThroughGoogle, now: at(4)) == .wait && remembered.completed == ["google"] && remembered.currentFlow == .okta)
+check("a remembered account: okta's page is filled next", remembered.next(oktaPage(username: true, password: true), now: at(5))
+      == .fill([.username, .password]))
+
 var skipped = SigninRun(steps: [.init(flow: .google, hasPassword: false, hasCode: false),
                                 .init(flow: .okta, hasPassword: true, hasCode: false)], siteHost: "mail.example.com", start: t0)
 _ = skipped.next(googlePage((true, false, false)), now: at(1))

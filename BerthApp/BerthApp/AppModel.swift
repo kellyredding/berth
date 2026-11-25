@@ -280,6 +280,12 @@ final class AppModel: ObservableObject {
         guard !signinBar.filling else { return .failure(.signinBusy) }
         signinBar.fillStarted(flows: request.flows)
         showMainWindow()
+        if let first = request.steps.first?.flow,
+           SigninStart.reloadFirst(firstFlow: first, host: mainWindow.webView.url?.host) {
+            Log.info("signin: the page is not \(first.rawValue)'s; starting from \(Self.describe(config.url))")
+            mainWindow.load(config.url)
+            await settled(mainWindow.webView)
+        }
         Log.info("signin: filling \(request)")
         let filler = SigninFiller(webView: mainWindow.webView)
         let progress = filler.$progress.compactMap { $0 }.sink { [weak self] in self?.signinBar.progressed($0) }
@@ -295,6 +301,24 @@ final class AppModel: ObservableObject {
         signinBar.fillFinished(SigninResult(data))
         expireSuccessLater()
         return .success(data)
+    }
+
+    /// Returns once the page has stopped loading for a moment, or after 15 s;
+    /// the filler then polls whatever page it finds.
+    private func settled(_ webView: WKWebView) async {
+        let deadline = Date().addingTimeInterval(15)
+        var idleSince: Date?
+        try? await Task.sleep(nanoseconds: 300_000_000)
+        while Date() < deadline {
+            if webView.isLoading {
+                idleSince = nil
+            } else if let since = idleSince, Date().timeIntervalSince(since) >= 1 {
+                return
+            } else if idleSince == nil {
+                idleSince = Date()
+            }
+            try? await Task.sleep(nanoseconds: 200_000_000)
+        }
     }
 
     // MARK: - Signing in from the app

@@ -210,6 +210,18 @@ struct SigninRequest: Equatable, CustomStringConvertible, CustomDebugStringConve
     }
 }
 
+// MARK: - Where a sign-in starts
+
+enum SigninStart {
+    /// Whether the page must first go back to the site's start address: it is
+    /// not on the first step's flow, so filling would wait for a page that
+    /// never comes. A sign-in reached any other way, such as an identity
+    /// provider's own page, would also not lead back to the site.
+    static func reloadFirst(firstFlow: SigninFlow, host: String?) -> Bool {
+        !firstFlow.spec.hosts.keeps(host: host)
+    }
+}
+
 // MARK: - Step model
 
 /// What the sign-in script saw on the page: the host, the first marker found,
@@ -415,7 +427,10 @@ struct SigninRun {
     /// The page is not the current step's flow.
     private mutating func away(_ page: PageObservation, step: Step, now: Date) -> SigninDecision {
         let onSite = siteHost != nil && page.host?.lowercased() == siteHost
-        if sent.isEmpty && !onSite {
+        // Picking a remembered account can carry the page straight on to the
+        // next flow without a field ever being filled.
+        let progressed = !sent.isEmpty || chooserTried
+        if !progressed && !onSite {
             awaySince = nil
             if now.timeIntervalSince(stepStarted) > Self.arrival {
                 return stop("the page didn't match the \(step.flow.rawValue) sign-in: it shows \(page.host ?? "no page")")
@@ -424,7 +439,7 @@ struct SigninRun {
         }
         if awaySince == nil { awaySince = now }
         guard now.timeIntervalSince(awaySince!) >= Self.settle else { return .wait }
-        if sent.isEmpty {
+        if !progressed {
             // Already on the site: nothing to fill at the first step, and no
             // more to fill once an earlier step got it there.
             return .finish(outcome(stop: nil, alreadySignedIn: completed.isEmpty))
