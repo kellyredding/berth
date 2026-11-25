@@ -24,10 +24,13 @@ describe "the signing scripts" do
   account = {"BERTH_SIGNING_OP_ACCOUNT" => SpecHelper::SIGNING_ACCOUNT} of String => String?
   item = {"BERTH_SIGNING_OP_ITEM" => SpecHelper::SIGNING_ITEM} of String => String?
 
+  # bin/package refuses before it builds anything; past the check, PATH has
+  # no op, so it stops there too.
   {
     "sign-app.sh op"          => {"bin/lib/sign-app.sh", ["op", "/nonexistent/Docs.app"]},
     "signing-identity show"   => {"bin/signing-identity", ["show"]},
     "signing-identity create" => {"bin/signing-identity", ["create"]},
+    "package"                 => {"bin/package", ["--out", "/nonexistent/dist"]},
   }.each do |name, (path, args)|
     it "#{name} exits 2 naming each variable that is unset or empty" do
       both = script(path, args, {} of String => String?)
@@ -61,6 +64,16 @@ describe "the signing scripts" do
       result.exit_code.should_not eq(2)
       result.stderr.should_not contain("BERTH_SIGNING_OP")
     end
+  end
+
+  it "package refuses --sign adhoc without --local, and any other signing, before building" do
+    adhoc = script("bin/package", ["--sign", "adhoc"], {} of String => String?)
+    adhoc.exit_code.should eq(2)
+    adhoc.stderr.should eq("bin/package: a release must be signed with the release identity (--sign op); " \
+                           "--sign adhoc goes with --local.\n")
+    other = script("bin/package", ["--local", "--sign", "keychain"], {} of String => String?)
+    other.exit_code.should eq(2)
+    other.stderr.should eq("bin/package: --sign takes op or adhoc, not 'keychain'.\n")
   end
 
   # A missing target stops it before codesign, so nothing is signed.

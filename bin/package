@@ -1,0 +1,207 @@
+#!/usr/bin/env bash
+# Builds the berth CLI and the Release template Berth.app from this tree,
+# signs both with the "Berth Release Signing" identity, and writes one archive
+# for install.sh:
+#
+#   <out>/berth-darwin-arm64.tar.gz
+#   <out>/berth-darwin-arm64.tar.gz.sha256
+#
+# Usage: bin/package [--local] [--sign op|adhoc] [--out DIR]
+#
+#   --local   Allow uncommitted changes (for `berth update --local`).
+#   --sign    op (the default, always): the release identity from 1Password,
+#             found through BERTH_SIGNING_OP_ACCOUNT and BERTH_SIGNING_OP_ITEM.
+#             adhoc, with --local only, checks that a build packages; install.sh
+#             refuses its archive.
+#   --out     Where to write the archive (default: dist/).
+set -euo pipefail
+
+ROOT="$(cd "$(dirname "$0")/.." && pwd)"
+ASSET="berth-darwin-arm64.tar.gz"
+TEMPLATE_ID="com.kellyredding.berth"
+# Not under the template's identifier plus a dot, where site apps live: a site
+# named "cli" would share it.
+BINARY_ID="com.kellyredding.berth-cli"
+MIN_MACOS=26
+
+local_build=false
+sign=op
+out="$ROOT/dist"
+while [[ $# -gt 0 ]]; do
+  case "$1" in
+    --local) local_build=true ;;
+    --sign) sign="${2:?--sign needs op or adhoc}"; shift ;;
+    --out) out="${2:?--out needs a directory}"; shift ;;
+    -h|--help) sed -n '2,16p' "$0" | sed 's/^# \{0,1\}//'; exit 0 ;;
+    *) echo "bin/package: unknown option '$1'" >&2; exit 2 ;;
+  esac
+  shift
+done
+
+say() { printf '==> %s\n' "$*"; }
+die() { printf 'bin/package: %s\n' "$*" >&2; exit 1; }
+
+# Never a fallback to ad hoc when op or its variables are missing: an ad-hoc
+# template makes ad-hoc site apps, which macOS may treat as new apps.
+[[ "$sign" == "op" || "$sign" == "adhoc" ]] || { echo "bin/package: --sign takes op or adhoc, not '$sign'." >&2; exit 2; }
+if [[ "$sign" == "adhoc" ]] && ! $local_build; then
+  echo "bin/package: a release must be signed with the release identity (--sign op); --sign adhoc goes with --local." >&2
+  exit 2
+fi
+
+# The same refusal sign-app.sh makes, made before the slow build.
+bp_require_signing_env() {
+  local ok=1
+  if [[ -z "${BERTH_SIGNING_OP_ACCOUNT:-}" ]]; then
+    echo "bin/package: BERTH_SIGNING_OP_ACCOUNT is not set. Set it in your shell profile to the 1Password account that holds the signing identity, its sign-in address or account ID:" >&2
+    echo "  export BERTH_SIGNING_OP_ACCOUNT='<account>.1password.com'" >&2
+    ok=0
+  fi
+  if [[ -z "${BERTH_SIGNING_OP_ITEM:-}" ]]; then
+    echo "bin/package: BERTH_SIGNING_OP_ITEM is not set. Set it in your shell profile to the signing identity's 1Password item:" >&2
+    echo "  export BERTH_SIGNING_OP_ITEM='op://<vault>/<item>'" >&2
+    ok=0
+  elif ! [[ "$BERTH_SIGNING_OP_ITEM" =~ ^op://[^/]*[^/[:space:]][^/]*/[^/]*[^/[:space:]][^/]*$ ]]; then
+    echo "bin/package: BERTH_SIGNING_OP_ITEM must be the signing identity's 1Password item, op://VAULT/ITEM, with no field:" >&2
+    echo "  export BERTH_SIGNING_OP_ITEM='op://<vault>/<item>'" >&2
+    ok=0
+  fi
+  (( ok )) || exit 2
+}
+if [[ "$sign" == "op" ]]; then
+  bp_require_signing_env
+  command -v op >/dev/null || die "the 1Password CLI (op) is not installed; it holds the signing identity."
+fi
+
+# --- Preflight -------------------------------------------------------------
+
+[[ "$(uname -m)" == "arm64" ]] || die "Berth releases are built on Apple Silicon (arm64) only."
+macos="$(sw_vers -productVersion)"
+(( ${macos%%.*} >= MIN_MACOS )) || die "macOS $MIN_MACOS or later is required (this Mac runs $macos)."
+
+for cmd in git xcodebuild xcodegen crystal node tar shasum otool codesign; do
+  command -v "$cmd" >/dev/null || die "'$cmd' is not installed; the build needs it."
+done
+
+cd "$ROOT"
+dirty=false
+[[ -n "$(git status --porcelain)" ]] && dirty=true
+if ! $local_build && $dirty; then
+  die "the working tree has changes. Commit them, or use --local."
+fi
+
+version="$(tr -d '[:space:]' < VERSION)"
+[[ "$version" =~ ^[0-9]+\.[0-9]+\.[0-9]+$ ]] || die "VERSION holds '$version', not a version like 1.2.3."
+commit="$(git rev-parse --short=12 HEAD)"
+built_at="$(date -u +%Y-%m-%dT%H:%M:%SZ)"
+
+say "Packaging Berth $version ($commit$($dirty && echo ', uncommitted changes')), signing: $sign"
+
+# Build tools are loud on stderr even when they succeed. Keep each step's
+# output in a log and show its tail only when the step fails. Logs survive a
+# failure, so the path in the error message still exists.
+logdir="$(mktemp -d)"
+work=""
+packaged=false
+# shellcheck disable=SC2329 # run by the trap below
+bp_cleanup() {
+  [[ -n "$work" ]] && rm -rf "${work:?}"
+  $packaged && rm -rf "${logdir:?}"
+  return 0
+}
+trap bp_cleanup EXIT
+
+bp_run_logged() {
+  local name="$1"; shift
+  local log="$logdir/$name.log"
+  if ! "$@" > "$log" 2>&1; then
+    tail -40 "$log" >&2
+    die "$name failed; full log: $log"
+  fi
+}
+
+# --- Build -----------------------------------------------------------------
+
+say "Building berth"
+bp_run_logged build-cli make -C tools/berth build
+cli_product="tools/berth/build/berth"
+[[ -x "$cli_product" ]] || die "the CLI build produced nothing at $cli_product"
+
+say "Building the template Berth.app (Release)"
+bp_run_logged build-app make -C BerthApp release
+app_product="BerthApp/build/Build/Products/Release/Berth.app"
+[[ -d "$app_product" ]] || die "the app build produced nothing at $app_product"
+
+# --- Stage -----------------------------------------------------------------
+
+work="$(mktemp -d)"
+stage="$work/berth"
+mkdir -p "$stage/bin" "$stage/libexec"
+
+cp "$cli_product" "$stage/bin/berth"
+ditto --noextattr --noqtn "$app_product" "$stage/Berth.app"
+install -m 755 bin/lib/sign-app.sh "$stage/libexec/sign-app.sh"
+
+plist="$stage/Berth.app/Contents/Info.plist"
+bp_plist() { /usr/bin/plutil -extract "$1" raw -o - "$plist" 2>/dev/null; }
+bp_stamp() { /usr/bin/plutil -replace "$1" "-$2" "$3" "$plist" || die "could not stamp $1 into Info.plist"; }
+# `berth sites build` takes only a template with this identifier and no site.
+bundle_id="$(bp_plist CFBundleIdentifier)" || die "Berth.app has no CFBundleIdentifier"
+[[ "$bundle_id" == "$TEMPLATE_ID" ]] || die "Berth.app's bundle identifier is $bundle_id, not $TEMPLATE_ID"
+if site="$(bp_plist BerthSite)"; then die "Berth.app names a site ($site); the template must name none"; fi
+bp_stamp CFBundleShortVersionString string "$version"
+bp_stamp BerthBuildCommit string "$commit"
+bp_stamp BerthBuildDirty bool "$dirty"
+bp_stamp BerthBuiltAt string "$built_at"
+
+# A release binary that loads a library from anywhere but /usr/lib starts
+# only on Macs that happen to have that library where this one does.
+libs="$(otool -L "$stage/bin/berth")"
+outside="$(printf '%s\n' "$libs" | tail -n +2 | awk '{print $1}' | { grep -v '^/usr/lib/' || true; })"
+[[ -z "$outside" ]] || die "berth links libraries outside /usr/lib:"$'\n'"$libs"
+
+# Signed last: any change to either target after this breaks its signature.
+say "Signing Berth.app and berth ($sign)"
+# Not logged and not piped: op talks to the 1Password app on the user's
+# behalf, and signing may need to ask the user to approve it.
+"$ROOT/bin/lib/sign-app.sh" "$sign" "$stage/Berth.app" "$BINARY_ID=$stage/bin/berth" \
+  || die "signing failed"
+# Output is captured before matching throughout: under pipefail, `| grep -q`
+# exits on its match, the writer dies of SIGPIPE, and the pipeline fails.
+signer="ad hoc"
+for target in "$stage/Berth.app=$TEMPLATE_ID" "$stage/bin/berth=$BINARY_ID"; do
+  path="${target%=*}"; id="${target##*=}"; name="$(basename "$path")"
+  codesign --verify --strict "$path" || die "the signed $name does not verify"
+  signature="$(codesign -dv --verbose=2 "$path" 2>&1)"
+  [[ "$signature" == *$'\n'"Identifier=$id"$'\n'* ]] || die "$name is not signed as $id"
+  if [[ "$sign" == "op" ]]; then
+    [[ "$signature" == *$'\n'"Authority="* ]] || die "signing $name with the release identity failed"
+    # The certificate's common name; the manifest names no 1Password account,
+    # vault or item.
+    signer="${signature#*$'\n'Authority=}"; signer="${signer%%$'\n'*}"
+  fi
+done
+
+berth_sha256="$(shasum -a 256 "$stage/bin/berth" | cut -d' ' -f1)"
+printf '%s\n' "$version" > "$stage/VERSION"
+{
+  printf '{\n'
+  printf '  "version": "%s",\n' "$version"
+  printf '  "commit": "%s",\n' "$commit"
+  printf '  "dirty": %s,\n' "$dirty"
+  printf '  "built_at": "%s",\n' "$built_at"
+  printf '  "signing": "%s",\n' "$sign"
+  printf '  "signer": "%s",\n' "$signer"
+  printf '  "berth_sha256": "%s"\n' "$berth_sha256"
+  printf '}\n'
+} > "$stage/manifest.json"
+
+# --- Archive ---------------------------------------------------------------
+
+mkdir -p "$out"
+tar -czf "$out/$ASSET" -C "$work" berth
+(cd "$out" && shasum -a 256 "$ASSET" > "$ASSET.sha256")
+
+packaged=true
+say "Wrote $out/$ASSET ($(du -h "$out/$ASSET" | cut -f1 | tr -d ' '))"
+echo "$out/$ASSET"
