@@ -11,8 +11,13 @@ final class AppModel: ObservableObject {
     let cli: CLIRunner
     let configStore: ConfigStore
     let downloads: Downloads
+    let notifier = Notifier()
     let safariVersion: String
     private var configuration: WKWebViewConfiguration?
+    /// The notification shim the windows' pages get at their next load: the
+    /// site's hosts and macOS's permission, or none when the site leaves
+    /// notifications off.
+    private var shimState: NotificationShimState?
     private(set) var mainWindow: BrowserWindowController?
     private var popups: [BrowserWindowController] = []
     private var messageWindow: MessageWindowController?
@@ -91,6 +96,12 @@ final class AppModel: ObservableObject {
         configStore.objectWillChange
             .sink { [weak self] _ in self?.objectWillChange.send() }
             .store(in: &subscriptions)
+        notifier.objectWillChange
+            .sink { [weak self] _ in self?.objectWillChange.send() }
+            .store(in: &subscriptions)
+        notifier.onAuthorizationChange = { [weak self] in self?.notificationPermissionChanged() }
+        notifier.onClick = { [weak self] webView, pageID in self?.notificationClicked(webView: webView, pageID: pageID) }
+        notifier.start()
         configStore.onLoad = { [weak self] in self?.configLoaded() }
         Log.info("user agent: WebKit's own + \(UserAgent.applicationName(safariVersion: safariVersion))")
         configStore.start()
@@ -119,13 +130,18 @@ final class AppModel: ObservableObject {
         updateBadge(title: mainWindow?.webView.title)
         LaunchAtLoginChoice.apply(configured: config.launchAtLogin, site: site)
         signinBar.configure(name: config.name, signin: config.signin, keep: config.keep, at: Date())
+        notifier.enabled = config.notifications
+        notifier.keep = config.keep
 
         if mainWindow == nil { createMainWindow(config) }
+        refreshNotificationShim()
     }
 
     private func createMainWindow(_ config: SiteConfig) {
         let configuration = WebSession.configuration(site: site, safariVersion: safariVersion)
+        notifier.install(in: configuration.userContentController)
         self.configuration = configuration
+        refreshNotificationShim()
         let controller = BrowserWindowController(model: self, configuration: configuration, role: .main)
         mainWindow = controller
 
@@ -236,6 +252,60 @@ final class AppModel: ObservableObject {
     static func describe(_ url: URL) -> String {
         guard let scheme = url.scheme, let host = url.host else { return url.scheme.map { "\($0): URL" } ?? "a URL" }
         return "\(scheme)://\(host)\(url.path.isEmpty ? "/" : url.path)"
+    }
+
+    // MARK: - Notifications
+
+    /// User scripts apply from a page's next load; the native side refuses
+    /// what the config no longer allows meanwhile.
+    private func refreshNotificationShim() {
+        guard let controller = configuration?.userContentController, let config = configStore.config else { return }
+        let wanted = NotificationShimState.wanted(
+            notifications: config.notifications, keep: config.keep, authorization: notifier.authorization
+        )
+        guard wanted != shimState else { return }
+        shimState = wanted
+        controller.removeAllUserScripts()
+        guard let wanted else {
+            Log.info("notification: off for this site")
+            return
+        }
+        controller.addUserScript(WKUserScript(
+            source: NotificationShim.userScript(keep: wanted.keep, permission: wanted.permission),
+            injectionTime: .atDocumentStart, forMainFrameOnly: true, in: .page
+        ))
+    }
+
+    /// Pages already open learn the new permission at once; new ones get it
+    /// from the shim.
+    private func notificationPermissionChanged() {
+        refreshNotificationShim()
+        guard configStore.config?.notifications == true else { return }
+        let permission = notifier.authorization.pagePermission.rawValue
+        for controller in [mainWindow].compactMap({ $0 }) + popups {
+            controller.webView.callAsyncJavaScript(
+                NotificationShim.permissionBody, arguments: ["permission": permission], in: nil, in: .page
+            ) { _ in }
+        }
+    }
+
+    /// Brings forward the window whose page posted it, the main window when
+    /// that is gone, and fires the page's `click` for that notification.
+    private func notificationClicked(webView: WKWebView?, pageID: String?) {
+        let controller = ([mainWindow].compactMap { $0 } + popups).first { $0.webView === webView }
+        if let controller, controller.role == .popup {
+            controller.show()
+            activate()
+        } else {
+            showMainWindow()
+        }
+        guard let controller, let pageID else { return }
+        controller.webView.callAsyncJavaScript(
+            NotificationShim.clickBody, arguments: ["id": pageID], in: nil, in: .page
+        ) { result in
+            if case .success(let handled) = result, handled as? Bool == true { return }
+            Log.info("notification: the page no longer has it; the window came forward only")
+        }
     }
 
     // MARK: - Socket

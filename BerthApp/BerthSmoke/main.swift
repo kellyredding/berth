@@ -762,6 +762,122 @@ retried.cliFinished(.failed("Sign-in failed: x"))
 retried.launched(login: "work")
 check("bar: trying again replaces it", retried.display == .waitingFor1Password)
 
+// MARK: - Notifications
+
+check("permission: default before macOS is asked", NotificationAuthorization.notDetermined.pagePermission == .default)
+check("permission: denied once macOS refuses", NotificationAuthorization.denied.pagePermission == .denied)
+check("permission: granted once macOS allows", NotificationAuthorization.authorized.pagePermission == .granted)
+check("permission: the page's strings", [NotificationPermission.default, .denied, .granted].map(\.rawValue) == ["default", "denied", "granted"])
+
+func noteParse(_ json: String) -> Result<NotificationMessage, NotificationRefusal> {
+    NotificationMessage.parse(try? JSONSerialization.jsonObject(with: Data(json.utf8)))
+}
+
+check("a request parses", noteParse(#"{"op":"request"}"#) == .success(.request))
+check("a notification parses", noteParse(#"{"op":"show","id":"a-1","title":"New mail","body":"Hello","tag":"inbox","silent":true}"#)
+      == .success(.show(NotificationContent(id: "a-1", title: "New mail", body: "Hello", tag: "inbox", silent: true))))
+check("body, tag and silent are optional", noteParse(#"{"op":"show","id":"a-1","title":"T","body":null}"#)
+      == .success(.show(NotificationContent(id: "a-1", title: "T", body: "", tag: "", silent: false))))
+let longTitle = String(repeating: "t", count: 500)
+let longBody = String(repeating: "b", count: 5000)
+if case .success(.show(let clipped)) = NotificationMessage.parse(["op": "show", "id": "a-1", "title": longTitle, "body": longBody]) {
+    check("a long title is clipped, ending in an ellipsis",
+          clipped.title.count == NotificationMessage.maxTitle && clipped.title.hasSuffix("…"))
+    check("a long body is clipped", clipped.body.count == NotificationMessage.maxBody && clipped.body.hasSuffix("…"))
+} else {
+    check("a long notification still parses", false)
+}
+check("text within the limits is untouched", NotificationMessage.clip("New mail", to: 200) == "New mail")
+check("a close parses", noteParse(#"{"op":"close","id":"a-1","tag":"inbox"}"#) == .success(.close(id: "a-1", tag: "inbox")))
+check("no title is refused", noteParse(#"{"op":"show","id":"a-1"}"#) == .failure(.badMessage("title")))
+check("a title that is not a string is refused", noteParse(#"{"op":"show","id":"a-1","title":3}"#) == .failure(.badMessage("title")))
+check("no id is refused", noteParse(#"{"op":"show","title":"T"}"#) == .failure(.badMessage("id")))
+check("a long id is refused", NotificationMessage.parse(["op": "show", "id": String(repeating: "i", count: 65), "title": "T"])
+      == .failure(.badMessage("id")))
+check("a long tag is refused", NotificationMessage.parse(["op": "show", "id": "a-1", "title": "T", "tag": String(repeating: "g", count: 257)])
+      == .failure(.badMessage("tag")))
+check("silent must be a boolean", noteParse(#"{"op":"show","id":"a-1","title":"T","silent":1}"#) == .failure(.badMessage("silent")))
+check("an unknown op is refused", noteParse(#"{"op":"spam"}"#) == .failure(.badMessage("op")))
+check("a message that is not an object is refused", NotificationMessage.parse("hello") == .failure(.badMessage("not an object with an op")))
+check("a refusal never quotes the title or body", NotificationRefusal.badMessage("title").logLine == "notification: refused (bad message: title)")
+
+let noteKeep = KeepList(["mail.example.com", "*.example.net"])
+check("gate: a kept page's main frame is heard",
+      NotificationGate.check(enabled: true, mainFrame: true, host: "mail.example.com", keep: noteKeep) == nil
+        && NotificationGate.check(enabled: true, mainFrame: true, host: "chat.example.net", keep: noteKeep) == nil)
+check("gate: nothing when the site leaves notifications off",
+      NotificationGate.check(enabled: false, mainFrame: true, host: "mail.example.com", keep: noteKeep) == .off)
+check("gate: a subframe is ignored", NotificationGate.check(enabled: true, mainFrame: false, host: "mail.example.com", keep: noteKeep) == .subframe)
+check("gate: a host outside keep is ignored",
+      NotificationGate.check(enabled: true, mainFrame: true, host: "ads.example.org", keep: noteKeep) == .host("ads.example.org"))
+check("gate: no host is ignored", NotificationGate.check(enabled: true, mainFrame: true, host: "", keep: noteKeep) == .host(""))
+
+var noteLimit = NotificationRateLimit()
+check("rate: three in a second are posted", (0..<3).allSatisfy { noteLimit.allow(at: at(Double($0) * 0.1)) })
+check("rate: a fourth in that second is dropped", !noteLimit.allow(at: at(0.5)))
+check("rate: a second later more are posted", noteLimit.allow(at: at(1.05)))
+var minuteLimit = NotificationRateLimit()
+let minuteAllowed = (0..<40).filter { minuteLimit.allow(at: at(Double($0))) }.count
+check("rate: at most thirty in a minute", minuteAllowed == NotificationRateLimit.perMinute)
+check("rate: a minute after the first, more are posted", minuteLimit.allow(at: at(60.5)))
+check("rate: a dropped notification says so without its text",
+      NotificationRefusal.rate.logLine == "notification: dropped (more than 3 a second or 30 a minute)")
+
+check("identity: a tag names one notification per host",
+      NotificationIdentity.identifier(host: "mail.example.com", tag: "inbox", id: "a-1")
+        == NotificationIdentity.identifier(host: "mail.example.com", tag: "inbox", id: "b-7"))
+check("identity: the same tag on another host is another notification",
+      NotificationIdentity.identifier(host: "mail.example.com", tag: "inbox", id: "a-1")
+        != NotificationIdentity.identifier(host: "chat.example.net", tag: "inbox", id: "a-1"))
+check("identity: without a tag each notification is its own",
+      NotificationIdentity.identifier(host: "mail.example.com", tag: "", id: "a-1")
+        != NotificationIdentity.identifier(host: "mail.example.com", tag: "", id: "a-2"))
+check("log: a posted notification names its tag", NotificationIdentity.postedLine(tag: "inbox") == "notification: posted (tag inbox)")
+check("log: or that it has none", NotificationIdentity.postedLine(tag: "") == "notification: posted (no tag)")
+check("log: a long tag is clipped", NotificationIdentity.postedLine(tag: String(repeating: "g", count: 200)).count < 100)
+
+final class FakePage {}
+let pageA = FakePage()
+var noteTargets = NotificationTargets<FakePage>(capacity: 3)
+noteTargets.record(identifier: "tag|h|inbox", pageID: "a-1", tag: "inbox", target: pageA)
+noteTargets.record(identifier: "tag|h|inbox", pageID: "a-2", tag: "inbox", target: pageA)
+check("targets: a repeated tag points at the latest notification",
+      noteTargets.entries.count == 1 && noteTargets.entry(identifier: "tag|h|inbox")?.pageID == "a-2"
+        && noteTargets.entry(identifier: "tag|h|inbox")?.target === pageA)
+check("targets: closing the replaced one leaves the latest",
+      noteTargets.remove(pageID: "a-1", identifier: "tag|h|inbox") == nil && noteTargets.entry(identifier: "tag|h|inbox") != nil)
+check("targets: closing the latest forgets it",
+      noteTargets.remove(pageID: "a-2", identifier: "tag|h|inbox") == "tag|h|inbox" && noteTargets.entries.isEmpty)
+for index in 1...5 { noteTargets.record(identifier: "id|h|\(index)", pageID: "\(index)", tag: "", target: nil) }
+check("targets: only the latest few are kept", noteTargets.entries.map(\.pageID) == ["3", "4", "5"])
+do {
+    var weakTargets = NotificationTargets<FakePage>()
+    do {
+        let page = FakePage()
+        weakTargets.record(identifier: "id|h|x", pageID: "x", tag: "", target: page)
+    }
+    check("targets: a closed page is not kept alive", weakTargets.entry(identifier: "id|h|x")?.target == nil)
+}
+
+let shim = NotificationShim.userScript(keep: ["mail.example.com", "*.example.net"], permission: .granted)
+check("shim: called with the site's hosts, the permission and the handler",
+      shim.contains(#"berthNotificationShim({"handler":"berthNotifications","keep":["mail.example.com","*.example.net"],"permission":"granted"});"#))
+check("shim: wrapped so it adds no global of its own", shim.hasPrefix("(function () {\nfunction berthNotificationShim(config) {")
+      && shim.hasSuffix("\n})();"))
+check("shim: replaces window.Notification and answers the app",
+      NotificationShim.source.contains(#"Object.defineProperty(window, "Notification""#)
+        && NotificationShim.source.contains(#"Object.defineProperty(window, "__berthNotification""#))
+check("shim: a click calls into it and returns whether the page had it",
+      NotificationShim.clickBody.hasSuffix("return berthNotificationClicked(id);"))
+check("shim: none when the site leaves notifications off",
+      NotificationShimState.wanted(notifications: false, keep: noteKeep, authorization: .authorized) == nil)
+check("shim: otherwise the hosts and the page's permission",
+      NotificationShimState.wanted(notifications: true, keep: noteKeep, authorization: .denied)
+        == NotificationShimState(keep: ["mail.example.com", "*.example.net"], permission: .denied))
+check("System Settings opens at this app's notifications",
+      NotificationSettingsLink.url(bundleID: "com.kellyredding.berth.mail")?.absoluteString
+        == "x-apple.systempreferences:com.apple.Notifications-Settings.extension?id=com.kellyredding.berth.mail")
+
 // MARK: - Small rules
 
 check("no build commit is a development build", BuildLabel.text(commit: nil) == "development build")

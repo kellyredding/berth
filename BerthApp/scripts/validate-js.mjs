@@ -28,7 +28,7 @@ const SRC_DIR = join(APP_ROOT, "BerthApp");
 // A marked literal that moves out of this tree is not reported missing; it
 // just stops being found and everything left passes. Lower this only in the
 // change that moves a literal, once its new home validates it.
-const EXPECTED_MIN_LITERALS = 1;
+const EXPECTED_MIN_LITERALS = 4;
 
 // Swift's `"""` unescaping. Load-bearing: the source `/\n/g` is a valid regex
 // to node, but Swift turns its `\n` into a real newline, which is not.

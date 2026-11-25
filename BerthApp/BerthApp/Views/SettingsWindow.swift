@@ -1,7 +1,7 @@
 import AppKit
 import SwiftUI
 
-/// Settings: Launch at Login, and what this app is.
+/// Settings: Launch at Login, notifications, and what this app is.
 @MainActor
 final class SettingsWindowController: NSWindowController {
     private static var shared: SettingsWindowController?
@@ -50,6 +50,9 @@ struct SettingsView: View {
                         .foregroundStyle(.orange)
                 }
             }
+            if model.configStore.config?.notifications == true {
+                notificationsSection
+            }
             Section {
                 LabeledContent("Site", value: model.site)
                 LabeledContent("Name", value: model.displayName)
@@ -68,6 +71,44 @@ struct SettingsView: View {
         .onAppear {
             launchAtLogin = LaunchAtLogin.isEnabled
             requiresApproval = LaunchAtLogin.requiresApproval
+            model.notifier.refreshAuthorization()
+        }
+    }
+
+    /// macOS's answer, not a preference of the app's: turning it on asks
+    /// macOS the first time, and after that only System Settings changes it.
+    private var notificationsSection: some View {
+        let notifier = model.notifier
+        return Section {
+            Toggle("Show notifications", isOn: Binding(
+                get: { notifier.authorization == .authorized },
+                set: { on in
+                    if on && notifier.authorization == .notDetermined {
+                        notifier.requestAuthorization()
+                    } else {
+                        notifier.openSystemSettings()
+                    }
+                }
+            ))
+            switch notifier.authorization {
+            case .notDetermined:
+                Text("macOS asks the first time \(model.displayName) asks to notify you, or when you turn this on.")
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+            case .denied:
+                HStack {
+                    Text("Turned off in System Settings › Notifications.")
+                        .font(.caption)
+                        .foregroundStyle(.orange)
+                    Spacer()
+                    Button("Open Notification Settings…") { notifier.openSystemSettings() }
+                        .controlSize(.small)
+                }
+            case .authorized:
+                Text("\(model.displayName) also needs its own desktop notifications setting turned on.")
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+            }
         }
     }
 }

@@ -175,7 +175,7 @@ bundle identifier (`com.kellyredding.berth.mail`).
 | `badge.title` | no | no badge | A regular expression whose one capture group, matched against the page title, is the Dock badge |
 | `handles` | no | `[]` | URL schemes the app handles: `mailto` |
 | `mailto` | when `handles` has `mailto` | none | The URL a `mailto:` link opens, with `%s` where the link goes |
-| `notifications` | no | `false` | Whether the page's web notifications become macOS notifications |
+| `notifications` | no | `false` | Whether the page's web notifications become macOS notifications ("Notifications") |
 | `launch_at_login` | no | `false` | Whether the app opens at login |
 | `signin` | no | `{}` | Named logins, each the ordered steps of one sign-in |
 
@@ -461,6 +461,55 @@ the outcome from the exit status and the `--json` output on stdout:
 | 4 | — | 1Password didn't approve, or isn't available |
 | 5 | — | No such login |
 | any other | `error`, else stderr's last `berth:` line | The sign-in failed, with that message |
+
+## Notifications (`notifications`)
+
+The app's alone; the CLI only validates and exports the key. WebKit's web
+view has no `window.Notification`, so a site app whose site sets
+`notifications` gives its pages one.
+
+- **The shim** (`BerthApp/BerthApp/Models/NotificationShim.swift`) is a user
+  script injected at document start, main frame only, in the page's own
+  content world, on hosts `keep` matches; other hosts and sites without
+  `notifications` get none. It replaces `window.Notification`:
+  `Notification.permission` is `"granted"` once macOS allows the app's
+  notifications, `"denied"` once it refuses, and `"default"` before it is
+  asked; `Notification.requestPermission()`, with a callback or as a
+  promise, asks macOS through the app and resolves with the answer; `new
+  Notification(title, {body, tag, icon, silent, data, …})` posts to the
+  `berthNotifications` script message handler and returns an object with
+  `close()`, `onclick`, `onclose`, `onshow`, `onerror` and
+  `addEventListener` for those events. `show` fires once macOS takes it and
+  `error` when it does not (no permission, the rate limit, a refusal). A
+  change to the config or to macOS's answer reaches a page at its next load;
+  a page already open learns a new permission at once.
+- **Asking macOS** happens the first time a page calls `requestPermission()`,
+  or when the person turns on "Show notifications" in Settings, never at
+  launch: a page asks when the person turns on its own desktop
+  notifications, so the prompt comes when they want it.
+- **Posting** uses `UNUserNotificationCenter` with the title and body. The
+  `tag` (per host) is the request's identifier, so a notification posted
+  with a tag already showing replaces it. `silent` drops the sound. `icon`
+  is ignored: macOS shows the site app's own icon. `data` stays in the page.
+  A notification shows even while the app is in front, since the page
+  decides when to notify.
+- **Clicking one** brings forward the window whose page posted it (the main
+  window when that is gone) and fires that `Notification`'s `click`, which
+  is how a page opens the item. A page reloaded since then gets nothing, and
+  the window still comes forward. `close()` removes it from Notification
+  Center; clearing it there tells the page nothing.
+- **Limits:** messages from a subframe or from a host outside `keep` are
+  ignored, as is everything when the site's `notifications` is false. A
+  title is cut to 200 characters and a body to 1000; a tag over 256 or an id
+  over 64 refuses the message. At most 3 a second and 30 a minute are
+  posted; the rest are dropped. The rules live in `NotificationRules.swift`.
+- **The log** gets one line per notification, `notification: posted (tag
+  TAG)` or `(no tag)`, and refusals by kind (each at most once in 10 s),
+  never a title or body.
+- **Settings** shows "Show notifications" as macOS's answer: off before it
+  is asked (turning it on asks), on once allowed, and off with a link to
+  System Settings › Notifications for this app once refused. Only System
+  Settings changes an answer macOS has given.
 
 ## CLI exit codes
 
