@@ -30,7 +30,7 @@ module Berth
                                    Add or replace a sign-in login: a JSON list of
                                    steps, each {"flow": "google"|"okta", "item": "op://…"}
                                    or {"flow": "google", "email_from": "op://…"}, with
-                                   "account": "example.1password.com" (or an account ID)
+                                   "account": "example.1password.com" (or an ID)
                                    when the item is not in op's default account, and
                                    for okta, "method": "TEXT" to choose the row of
                                    Okta's verification method list holding TEXT

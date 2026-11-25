@@ -10,8 +10,15 @@ module Berth
     extend self
 
     TEMPLATE_ID = "com.kellyredding.berth"
-    IDENTITY    = "Berth Release Signing"
-    ICON_FILE   = "SiteIcon"
+    # The release certificate's common name (bin/signing-identity), which a
+    # signed app shows as its Authority. Not the 1Password item's title.
+    IDENTITY  = "Berth Release Signing"
+    ICON_FILE = "SiteIcon"
+
+    # Where `sign-app.sh op` finds the identity in 1Password. It inherits them
+    # from this process; nothing in the repository names either.
+    ACCOUNT_VARIABLE = "BERTH_SIGNING_OP_ACCOUNT"
+    ITEM_VARIABLE    = "BERTH_SIGNING_OP_ITEM"
 
     # The files of a full iconset, and each one's size in pixels.
     ICONSET = {
@@ -105,6 +112,29 @@ module Berth
         raise Error.new("#{path} is not a Berth template: it is a site app (BerthSite #{site})")
       end
       Template.new(path, plist["CFBundleShortVersionString"], plist["BerthBuildCommit"])
+    end
+
+    # Refuses `--sign op` when either variable is unset, empty or malformed,
+    # naming each, before anything is copied.
+    def require_signing_env : Nil
+      problems = [] of String
+      account = ENV[ACCOUNT_VARIABLE]?
+      if account.nil? || account.empty?
+        problems << "#{ACCOUNT_VARIABLE} is not set: the 1Password account that holds the signing identity, " \
+                    "its sign-in address or account ID\n  export #{ACCOUNT_VARIABLE}='<account>.1password.com'"
+      end
+      item = ENV[ITEM_VARIABLE]?
+      if item.nil? || item.empty?
+        problems << "#{ITEM_VARIABLE} is not set: the signing identity's 1Password item\n" \
+                    "  export #{ITEM_VARIABLE}='op://<vault>/<item>'"
+      elsif OnePassword.parts(item).try(&.size) != 2
+        problems << "#{ITEM_VARIABLE} must be the signing identity's 1Password item, op://VAULT/ITEM, with no field\n" \
+                    "  export #{ITEM_VARIABLE}='op://<vault>/<item>'"
+      end
+      return if problems.empty?
+      raise SigningNotConfigured.new(
+        "--sign op reads the signing identity from 1Password, named by #{ACCOUNT_VARIABLE} and #{ITEM_VARIABLE}; " \
+        "set them in your shell profile (--sign adhoc needs neither, for development only)", problems)
     end
 
     # What building `site` would do to its app, refusing a destination that

@@ -15,6 +15,14 @@
 # adhoc: signs with no identity. macOS treats every ad-hoc build as a new app,
 #        so an installed site app may lose its notification permission and
 #        login item. Development and specs only; never for anything installed.
+#
+# op needs two variables, set in your own shell profile, never in this
+# repository; it exits 2 before doing anything when either is unset or empty:
+#
+#   BERTH_SIGNING_OP_ACCOUNT  the 1Password account holding the identity: its
+#                             sign-in address or account ID (op --account)
+#   BERTH_SIGNING_OP_ITEM     the identity's item, op://VAULT/ITEM, as
+#                             bin/signing-identity create stores it
 set -euo pipefail
 
 usage="usage: sign-app.sh (op|adhoc) <path|identifier=path>..."
@@ -22,8 +30,25 @@ mode="${1:?$usage}"
 shift
 (( $# > 0 )) || { echo "$usage" >&2; exit 2; }
 
-OP_ACCOUNT="${BERTH_SIGNING_OP_ACCOUNT:-example.1password.com}"
-OP_ITEM="${BERTH_SIGNING_OP_ITEM:-op://VAULT/ITEM}"
+# Exits 2 naming each signing variable that is unset, empty or malformed.
+bs_require_signing_env() {
+  local ok=1
+  if [[ -z "${BERTH_SIGNING_OP_ACCOUNT:-}" ]]; then
+    echo "sign-app.sh: BERTH_SIGNING_OP_ACCOUNT is not set. Set it in your shell profile to the 1Password account that holds the signing identity, its sign-in address or account ID:" >&2
+    echo "  export BERTH_SIGNING_OP_ACCOUNT='<account>.1password.com'" >&2
+    ok=0
+  fi
+  if [[ -z "${BERTH_SIGNING_OP_ITEM:-}" ]]; then
+    echo "sign-app.sh: BERTH_SIGNING_OP_ITEM is not set. Set it in your shell profile to the signing identity's 1Password item:" >&2
+    echo "  export BERTH_SIGNING_OP_ITEM='op://<vault>/<item>'" >&2
+    ok=0
+  elif ! [[ "$BERTH_SIGNING_OP_ITEM" =~ ^op://[^/]*[^/[:space:]][^/]*/[^/]*[^/[:space:]][^/]*$ ]]; then
+    echo "sign-app.sh: BERTH_SIGNING_OP_ITEM must be the signing identity's 1Password item, op://VAULT/ITEM, with no field:" >&2
+    echo "  export BERTH_SIGNING_OP_ITEM='op://<vault>/<item>'" >&2
+    ok=0
+  fi
+  (( ok )) || exit 2
+}
 
 # Splits a target into its path and the --identifier arguments it needs. An
 # identifier is a reverse-DNS name, so a path that merely contains "=" is
@@ -49,6 +74,9 @@ if [[ "$mode" == "adhoc" ]]; then
   exit 0
 fi
 [[ "$mode" == "op" ]] || { echo "sign-app.sh: unknown mode '$mode'" >&2; exit 2; }
+bs_require_signing_env
+OP_ACCOUNT="$BERTH_SIGNING_OP_ACCOUNT"
+OP_ITEM="$BERTH_SIGNING_OP_ITEM"
 for target in "$@"; do bs_target "$target"; done
 command -v op >/dev/null || { echo "sign-app.sh: the 1Password CLI (op) is not installed; it holds the signing identity" >&2; exit 1; }
 
@@ -79,7 +107,7 @@ for attempt in $(seq 1 20); do
     break
   fi
   if (( attempt == 1 )); then
-    echo "Approve the 1Password prompt to sign with Berth Release Signing (op said: $last_error)" >&2
+    echo "Approve the 1Password prompt to sign with the release identity (op said: $last_error)" >&2
   fi
   if (( attempt == 20 )); then
     echo "1Password never provided the signing identity. Last error from op: $last_error" >&2

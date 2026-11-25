@@ -318,7 +318,7 @@ describe Berth::Config::Validator do
     end
 
     it "needs an item to be op://VAULT/ITEM, since it reads the item's username, password and code" do
-      ["op://V/I", "op://Private Vault/Some Item"].each do |reference|
+      ["op://V/I", "op://Example Vault/Some Item"].each do |reference|
         SpecHelper.errors(signin(%({"me": [{"flow": "google", "item": #{reference.to_json}}]}))).should be_empty, reference
       end
       ["op://V", "op://V/", "op:///I", "op://V/I/password", "op://V/I/Section/field", "op://V/ /f", "V/I", "https://V/I"].each do |reference|
@@ -359,7 +359,7 @@ describe Berth::Config::Validator do
     end
 
     it "needs an account to be a sign-in address or an ID" do
-      ["https://example.1password.com", "my 1password", "", ".example.com", "example.com-", "a" * 129, "me@example.com"].each do |account|
+      ["https://example.1password.com", "example 1password", "", ".example.com", "example.com-", "a" * 129, "me@example.com"].each do |account|
         SpecHelper.errors(signin(%({"me": [{"flow": "google", "item": "op://V/I", "account": #{account.to_json}}]})))
           .should eq(["sites.mail.signin.me[0].account: must be a 1Password account, its sign-in address " \
                       "(such as example.1password.com) or its ID, got #{account.to_json}"]), account

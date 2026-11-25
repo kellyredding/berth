@@ -74,11 +74,19 @@ make app-check   # app: build + smoke (BerthApp/Makefile's check)
 
 macOS ties a site app's notification permission and login item to its
 signature. **Never sign ad hoc** anything that gets installed. Releases and
-every site app are signed with the self-signed "Berth Release Signing"
-identity from 1Password, which Kelly approves, so each app keeps one
-signature across rebuilds and updates. `berth sites build --sign adhoc` is
-for scratch directories only (`BERTH_APPLICATIONS_DIR`). Agents never run
-`bin/signing-identity create`; Kelly does.
+every site app are signed with one self-signed identity (its certificate's
+common name is `Berth Release Signing`) kept in 1Password, which Kelly
+approves, so each app keeps one signature across rebuilds and updates.
+`berth sites build --sign adhoc` is for scratch directories only
+(`BERTH_APPLICATIONS_DIR`). Agents never run `bin/signing-identity create`;
+Kelly does.
+
+Signing reads the identity's 1Password account and item from
+`BERTH_SIGNING_OP_ACCOUNT` and `BERTH_SIGNING_OP_ITEM` (`op://VAULT/ITEM`),
+which a maintainer sets in their own shell profile. **Neither has a default,
+and none may be added**: the repository names no account, vault or item.
+Without them `--sign op`, `sign-app.sh op` and `bin/signing-identity` refuse
+with exit 2. Specs set placeholder values and use the fake signing script.
 
 ## Do not
 

@@ -22,11 +22,18 @@ module Berth
           --template PATH   The template Berth.app (default ~/.berth/template/Berth.app;
                             in a checkout, `make -C BerthApp release` builds
                             BerthApp/build/Build/Products/Release/Berth.app)
-          --sign op         Sign with "Berth Release Signing" from 1Password: one
+          --sign op         Sign with the release identity from 1Password: one
                             approval for every app in the build (the default)
           --sign adhoc      Sign with no identity, for development only: macOS may
                             forget an ad-hoc app's permissions on every rebuild
           --preview         Print what it would do and change nothing
+
+        --sign op reads the identity's 1Password account and item from two
+        variables, which you set in your own shell profile; without them it
+        refuses (exit 2) before copying anything:
+          BERTH_SIGNING_OP_ACCOUNT  The account's sign-in address or ID
+                                    (e.g. '<account>.1password.com')
+          BERTH_SIGNING_OP_ITEM     The identity's item, 'op://<vault>/<item>'
         TEXT
 
       ADHOC_WARNING = <<-TEXT
@@ -43,6 +50,7 @@ module Berth
         ids = args.positionals.uniq
         raise UsageError.new("give sites or --all, not both") if all && !ids.empty?
         raise UsageError.new("name the sites to build, or give --all") if !all && ids.empty?
+        SiteBuild.require_signing_env if signing.op?
 
         model = Config::Store.model
         sites = all ? model.sites : ids.map { |id| model.site!(id) }

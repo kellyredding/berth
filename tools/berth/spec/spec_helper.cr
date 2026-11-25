@@ -23,6 +23,9 @@ module SpecHelper
   FIXTURES = Path.new(File.realpath(File.expand_path("../../../fixtures", __DIR__)))
   PNG      = File.read((FIXTURES / "icons" / "mail.png").to_s)
 
+  SIGNING_ACCOUNT = "example.1password.com"
+  SIGNING_ITEM    = "op://Example Vault/Example Signing"
+
   record Result, stdout : String, stderr : String, exit_code : Int32 do
     def json : JSON::Any
       JSON.parse(stdout)
@@ -120,6 +123,9 @@ module SpecHelper
         "BERTH_LSREGISTER"       => (fakes / "lsregister").to_s,
         "FAKE_SIGN_EXIT"         => nil,
         "FAKE_SIGN_AUTHORITY"    => nil,
+        # Placeholders, so a run never picks up the maintainer's own.
+        "BERTH_SIGNING_OP_ACCOUNT" => SIGNING_ACCOUNT,
+        "BERTH_SIGNING_OP_ITEM"    => SIGNING_ITEM,
       } of String => String?
     end
   end
@@ -134,6 +140,7 @@ module SpecHelper
       SpecHelper.write_executable(dir / "sign-app.sh", <<-SH)
         #!/bin/sh
         echo "$*" >> "#{dir}/sign.calls"
+        echo "${BERTH_SIGNING_OP_ACCOUNT-unset} ${BERTH_SIGNING_OP_ITEM-unset}" >> "#{dir}/sign-env.calls"
         [ -n "$FAKE_SIGN_EXIT" ] && { echo "fake sign-app.sh: exit $FAKE_SIGN_EXIT" >&2; exit "$FAKE_SIGN_EXIT"; }
         mode="$1"; shift
         signer="${FAKE_SIGN_AUTHORITY:-Berth Release Signing}"

@@ -8,24 +8,60 @@
 #   create  Make the identity and store it in 1Password. Refuses if it exists.
 #   show    Print its SHA-1, read from 1Password.
 #
+# Both need two variables, set in your own shell profile, never in this
+# repository:
+#
+#   BERTH_SIGNING_OP_ACCOUNT  the 1Password account to use: its sign-in
+#                             address or account ID (op --account)
+#   BERTH_SIGNING_OP_ITEM     the identity's item, op://VAULT/ITEM; create
+#                             makes an item with that title in that vault
+#
 # Run it from a real terminal: 1Password's approval does not reach a shell
 # without one, such as an agent's.
 set -euo pipefail
 
-ACCOUNT="${BERTH_SIGNING_OP_ACCOUNT:-example.1password.com}"
-VAULT="${BERTH_SIGNING_OP_VAULT:-VAULT}"
-TITLE="Berth Release Signing"
+# The certificate's common name, which every signed app shows as its
+# Authority and `berth sites build` and `berth doctor` check for. It is not
+# the 1Password item's title, which comes from BERTH_SIGNING_OP_ITEM.
+COMMON_NAME="Berth Release Signing"
 
 case "${1:-}" in
   create|show) ;;
   *)
-    sed -n '2,13p' "$0" | sed 's/^# \{0,1\}//'
+    sed -n '2,20p' "$0" | sed 's/^# \{0,1\}//'
     [[ "${1:-}" == "-h" || "${1:-}" == "--help" ]] || exit 2
     exit 0
     ;;
 esac
 
 die() { printf 'bin/signing-identity: %s\n' "$*" >&2; exit 1; }
+
+# Exits 2 naming each variable that is unset, empty or malformed, and sets
+# VAULT and TITLE from the item reference.
+bs_require_signing_env() {
+  local ok=1
+  if [[ -z "${BERTH_SIGNING_OP_ACCOUNT:-}" ]]; then
+    echo "bin/signing-identity: BERTH_SIGNING_OP_ACCOUNT is not set. Set it in your shell profile to the 1Password account that holds the signing identity, its sign-in address or account ID:" >&2
+    echo "  export BERTH_SIGNING_OP_ACCOUNT='<account>.1password.com'" >&2
+    ok=0
+  fi
+  if [[ -z "${BERTH_SIGNING_OP_ITEM:-}" ]]; then
+    echo "bin/signing-identity: BERTH_SIGNING_OP_ITEM is not set. Set it in your shell profile to the signing identity's 1Password item:" >&2
+    echo "  export BERTH_SIGNING_OP_ITEM='op://<vault>/<item>'" >&2
+    ok=0
+  elif [[ "$BERTH_SIGNING_OP_ITEM" =~ ^op://([^/]*[^/[:space:]][^/]*)/([^/]*[^/[:space:]][^/]*)$ ]]; then
+    VAULT="${BASH_REMATCH[1]}"
+    TITLE="${BASH_REMATCH[2]}"
+  else
+    echo "bin/signing-identity: BERTH_SIGNING_OP_ITEM must be the signing identity's 1Password item, op://VAULT/ITEM, with no field:" >&2
+    echo "  export BERTH_SIGNING_OP_ITEM='op://<vault>/<item>'" >&2
+    ok=0
+  fi
+  (( ok )) || exit 2
+}
+
+bs_require_signing_env
+ACCOUNT="$BERTH_SIGNING_OP_ACCOUNT"
 command -v op >/dev/null || die "the 1Password CLI (op) is not installed."
 
 # op gives up on the desktop app within a few seconds, often while its
@@ -52,23 +88,23 @@ case "$1" in
 
     /usr/bin/openssl req -x509 -newkey rsa:3072 -nodes \
       -keyout "$work/key.pem" -out "$work/cert.pem" -days 3650 \
-      -subj "/CN=$TITLE" \
+      -subj "/CN=$COMMON_NAME" \
       -addext "keyUsage=critical,digitalSignature" \
       -addext "extendedKeyUsage=critical,codeSigning" \
       -addext "basicConstraints=critical,CA:false" 2>/dev/null
     p12pass="$(/usr/bin/openssl rand -hex 24)"
     /usr/bin/openssl pkcs12 -export -inkey "$work/key.pem" -in "$work/cert.pem" \
-      -out "$work/signing.p12" -passout "pass:$p12pass" -name "$TITLE"
+      -out "$work/signing.p12" -passout "pass:$p12pass" -name "$COMMON_NAME"
     sha1="$(/usr/bin/openssl x509 -in "$work/cert.pem" -noout -fingerprint -sha1 | cut -d= -f2 | tr -d ':')"
 
     # In op's assignment syntax a dot separates section from field, so
     # `signing.p12[file]` is field `p12` in section `signing`, read back as
-    # op://VAULT/ITEM/signing/p12 by bin/lib/sign-app.sh.
+    # $BERTH_SIGNING_OP_ITEM/signing/p12 by bin/lib/sign-app.sh.
     op item create --account "$ACCOUNT" --vault "$VAULT" --category Password \
       --title "$TITLE" \
       "password=$p12pass" \
       "sha1[text]=$sha1" \
-      "common name[text]=$TITLE" \
+      "common name[text]=$COMMON_NAME" \
       "notes[text]=Self-signed code-signing identity for Berth: signs the release (bin/release) and every site app berth sites build makes. Losing it means a new certificate; site apps rebuilt with it may ask again for their notification permission and login item (inferred, not tested)." \
       "signing.p12[file]=$work/signing.p12" >/dev/null
 

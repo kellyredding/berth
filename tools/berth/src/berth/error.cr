@@ -40,6 +40,24 @@ module Berth
     end
   end
 
+  # `--sign op` without the environment variables that name the signing
+  # identity's 1Password account and item.
+  class SigningNotConfigured < UsageError
+    getter problems : Array(String)
+
+    def initialize(message : String, @problems : Array(String))
+      super(message)
+    end
+
+    def details : Array(String)
+      problems.flat_map(&.lines).map { |line| "  #{line}" }
+    end
+
+    protected def extra_json(json : JSON::Builder) : Nil
+      json.field "errors", problems
+    end
+  end
+
   # No such site or login, or the site's app is not built.
   class NotFound < Error
     def initialize(message : String)

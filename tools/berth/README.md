@@ -53,9 +53,9 @@ op|adhoc] [--preview]` copies the template (`~/.berth/template/Berth.app`, or
 `--template`) to `~/Applications/NAME.app` for each site, stamps its
 `Info.plist` and icon, signs every copy in one session, then swaps each in by
 rename and registers it with Launch Services. `--sign op`, the default, signs
-with "Berth Release Signing" from 1Password, one approval for the whole
-build; `--sign adhoc` is for development, and warns that macOS may forget an
-ad-hoc app's permissions. `--preview` prints the plan and changes nothing. It
+with the release identity from 1Password, one approval for the whole build;
+`--sign adhoc` is for development, and warns that macOS may forget an ad-hoc
+app's permissions. `--preview` prints the plan and changes nothing. It
 refuses a missing template, an unknown site (exit 5), and anything at a
 destination that is not that site's Berth app, changing nothing; a link
 there is replaced, never its target. It never launches, quits or restarts an
@@ -70,10 +70,21 @@ The signing script is `bin/lib/sign-app.sh`. A CLI built in a checkout runs
 the checkout's copy; an installed one runs `~/.berth/libexec/sign-app.sh`;
 `BERTH_SIGN_SCRIPT` overrides both.
 
+`--sign op` needs two variables naming where the identity lives in
+1Password. Set them in your own shell profile; Berth has no defaults:
+
+```bash
+export BERTH_SIGNING_OP_ACCOUNT='<account>.1password.com'   # sign-in address or account ID
+export BERTH_SIGNING_OP_ITEM='op://<vault>/<item>'          # the identity's item
+```
+
+Without either, or with an item that is not `op://VAULT/ITEM`, the build
+refuses (exit 2) before copying anything. `--sign adhoc` needs neither.
+
 **Health:** `doctor` checks the config and, for each site, its app: built and
-stamped for the site, signed by Berth Release Signing (ad hoc warns), known
-to Launch Services (another registered copy, or a development build, warns),
-and running. The install record and template checks are not built yet.
+stamped for the site, signed by the release certificate, Berth Release
+Signing (ad hoc warns), known to Launch Services (another registered copy,
+or a development build, warns), and running. The install record and template checks are not built yet.
 `version`; `update` is not built yet.
 
 Run `berth <command> --help` for each command's options.

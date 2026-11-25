@@ -263,6 +263,80 @@ describe "berth sites build" do
     end
   end
 
+  it "refuses --sign op before copying anything when either signing variable is unset or empty" do
+    SpecHelper.sandbox do |sandbox|
+      sandbox.write_template
+      unset = {"BERTH_SIGNING_OP_ACCOUNT" => nil, "BERTH_SIGNING_OP_ITEM" => nil} of String => String?
+      account_guidance = "  BERTH_SIGNING_OP_ACCOUNT is not set: the 1Password account that holds the signing identity, " \
+                         "its sign-in address or account ID\n" \
+                         "    export BERTH_SIGNING_OP_ACCOUNT='<account>.1password.com'\n"
+      item_guidance = "  BERTH_SIGNING_OP_ITEM is not set: the signing identity's 1Password item\n" \
+                      "    export BERTH_SIGNING_OP_ITEM='op://<vault>/<item>'\n"
+
+      both = build(sandbox, ["--all", "--json"], unset)
+      both.exit_code.should eq(2)
+      both.json["code"].should eq("usage")
+      both.json["errors"].size.should eq(2)
+      both.stderr.should contain("berth: --sign op reads the signing identity from 1Password, named by " \
+                                 "BERTH_SIGNING_OP_ACCOUNT and BERTH_SIGNING_OP_ITEM; set them in your shell profile " \
+                                 "(--sign adhoc needs neither, for development only)\n")
+      both.stderr.should contain(account_guidance + item_guidance)
+
+      account = build(sandbox, ["docs"], {"BERTH_SIGNING_OP_ACCOUNT" => ""})
+      account.exit_code.should eq(2)
+      account.stderr.should contain(account_guidance)
+      account.stderr.should_not contain("BERTH_SIGNING_OP_ITEM is not set")
+
+      item = build(sandbox, ["docs"], {"BERTH_SIGNING_OP_ITEM" => nil})
+      item.exit_code.should eq(2)
+      item.stderr.should contain(item_guidance)
+      item.stderr.should_not contain("BERTH_SIGNING_OP_ACCOUNT is not set")
+
+      build(sandbox, ["docs", "--preview"], unset).exit_code.should eq(2)
+      applications(sandbox).should be_empty
+      sandbox.calls("sign").should be_empty
+      sandbox.calls("codesign").should be_empty
+    end
+  end
+
+  it "refuses a signing item that is not op://VAULT/ITEM, without quoting it" do
+    SpecHelper.sandbox do |sandbox|
+      sandbox.write_template
+      ["Example Vault/Example Signing", "op://Example Vault", "op://Example Vault/Example Signing/signing/p12",
+       "op:// /Example Signing", "op://Example Vault/"].each do |reference|
+        result = build(sandbox, ["docs", "--json"], {"BERTH_SIGNING_OP_ITEM" => reference})
+        result.exit_code.should eq(2), reference
+        result.stderr.should contain(
+          "  BERTH_SIGNING_OP_ITEM must be the signing identity's 1Password item, op://VAULT/ITEM, with no field\n" \
+          "    export BERTH_SIGNING_OP_ITEM='op://<vault>/<item>'\n")
+        result.stderr.should_not contain("Example")
+        result.stdout.should_not contain("Example")
+      end
+      sandbox.calls("sign").should be_empty
+    end
+  end
+
+  it "hands the signing variables to the signing script through its environment" do
+    SpecHelper.sandbox do |sandbox|
+      sandbox.write_template
+      build(sandbox, ["docs"]).exit_code.should eq(0)
+      sandbox.calls("sign-env").should eq(["#{SpecHelper::SIGNING_ACCOUNT} #{SpecHelper::SIGNING_ITEM}"])
+    end
+  end
+
+  it "needs neither signing variable to sign ad hoc, or for commands that do not sign" do
+    SpecHelper.sandbox do |sandbox|
+      sandbox.write_template
+      unset = {"BERTH_SIGNING_OP_ACCOUNT" => nil, "BERTH_SIGNING_OP_ITEM" => nil} of String => String?
+      result = build(sandbox, ["docs", "--sign", "adhoc"], unset)
+      result.exit_code.should eq(0), result.stderr
+      sandbox.calls("sign-env").should eq(["unset unset"])
+      SpecHelper.run(sandbox, ["sites", "list"], unset).exit_code.should eq(0)
+      SpecHelper.run(sandbox, ["config", "validate"], unset).exit_code.should eq(0)
+      SpecHelper.run(sandbox, ["status"], unset).exit_code.should eq(0)
+    end
+  end
+
   it "refuses a missing template, or one that is not a Berth template" do
     SpecHelper.sandbox do |sandbox|
       missing = build(sandbox, ["docs"])

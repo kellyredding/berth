@@ -92,8 +92,25 @@ Then the CLI signs every copy in the build in one run of the signing script
 (`sign-app.sh op|adhoc PATH…`), so the release identity costs one 1Password
 approval; the script exits 4 when 1Password does not provide it. Each copy
 must pass `codesign --verify --strict`, carry its bundle identifier as its
-`Identifier`, and have `Berth Release Signing` as its `Authority` (or be ad
-hoc with `--sign adhoc`). Only then is each moved into place by rename, and
+`Identifier`, and have `Berth Release Signing`, the release certificate's
+common name, as its `Authority` (or be ad hoc with `--sign adhoc`).
+
+`--sign op` finds the identity in 1Password through two environment
+variables, which the signing script inherits from the CLI. Both are
+required and neither has a default: the repository names no 1Password
+account, vault or item. A maintainer sets them in their own shell profile.
+
+| Variable | Value |
+|---|---|
+| `BERTH_SIGNING_OP_ACCOUNT` | The account holding the identity: its sign-in address or account ID, passed to `op --account` |
+| `BERTH_SIGNING_OP_ITEM` | The identity's item, `op://VAULT/ITEM`; the script reads its `signing/p12`, `password` and `sha1` fields |
+
+When either is unset or empty, or the item is not `op://VAULT/ITEM`, the CLI
+refuses before copying anything (exit 2), naming each variable with an
+example (`export BERTH_SIGNING_OP_ITEM='op://<vault>/<item>'`), and so does
+`sign-app.sh op` run on its own. `--sign adhoc` and every other command need
+neither. `bin/signing-identity create|show` reads the same two, taking the
+vault and the new item's title from `BERTH_SIGNING_OP_ITEM`. Only then is each moved into place by rename, and
 registered with `lsregister -f`; every `*/Build/Products/*/Berth.app`
 registered is unregistered.
 

@@ -76,6 +76,11 @@ make app-check   # app gate: build and the smoke check
 
 `make check` does not build the app; a change touching both needs both.
 
+Signing reads the identity from 1Password through two variables you set in
+your own shell profile, `BERTH_SIGNING_OP_ACCOUNT` (the account's sign-in
+address or ID) and `BERTH_SIGNING_OP_ITEM` (`op://<vault>/<item>`). Berth
+has no defaults for them; see `docs/contract.md`.
+
 ## License
 
 MIT
