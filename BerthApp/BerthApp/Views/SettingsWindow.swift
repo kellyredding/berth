@@ -138,6 +138,17 @@ struct SettingsView: View {
                 Text("\(model.displayName) also needs its own desktop notifications setting turned on.")
                     .font(.caption)
                     .foregroundStyle(.secondary)
+                if DockBadgePermission.isOff(badgeRule: notifier.badgeRule, authorization: notifier.authorization,
+                                             badge: notifier.badgeSetting) {
+                    HStack {
+                        Text("Dock badge off: Badges is turned off in System Settings › Notifications.")
+                            .font(.caption)
+                            .foregroundStyle(.orange)
+                        Spacer()
+                        Button("Open Notification Settings…") { notifier.openSystemSettings() }
+                            .controlSize(.small)
+                    }
+                }
             }
         }
     }

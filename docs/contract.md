@@ -510,6 +510,19 @@ view has no `window.Notification`, so a site app whose site sets
   is asked (turning it on asks), on once allowed, and off with a link to
   System Settings › Notifications for this app once refused. Only System
   Settings changes an answer macOS has given.
+- **The Dock badge:** the app asks macOS for alerts and sounds, and for
+  badges too when the site has a `badge.title` rule; a site without one never
+  asks for badges. Once an app has notification permission, macOS appears to
+  show the badge the page title sets only while its Badges permission is on
+  (inferred from the Dock, not documented); an app allowed without asking for
+  badges has no Badges row in System Settings. So at launch, a site with
+  `notifications` and a badge rule whose app is allowed but never asked for
+  badges asks again with them, once, and logs the answer (`notification:
+  asked macOS for badges; Badges is enabled`). Whenever either answer
+  changes, the app sets its badge again. For a site with a badge rule, when
+  notifications are allowed and badges are not, Settings says "Dock badge
+  off" with the same System Settings link. The rules live in
+  `NotificationRules.swift` (`DockBadgePermission`).
 
 ## `mailto:` links (`handles`, `mailto`)
 

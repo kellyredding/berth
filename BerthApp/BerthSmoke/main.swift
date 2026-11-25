@@ -768,6 +768,34 @@ check("permission: default before macOS is asked", NotificationAuthorization.not
 check("permission: denied once macOS refuses", NotificationAuthorization.denied.pagePermission == .denied)
 check("permission: granted once macOS allows", NotificationAuthorization.authorized.pagePermission == .granted)
 check("permission: the page's strings", [NotificationPermission.default, .denied, .granted].map(\.rawValue) == ["default", "denied", "granted"])
+check("options: notifications with a badge rule ask for alerts, sounds and badges",
+      DockBadgePermission.options(notifications: true, badgeRule: true) == [.alert, .sound, .badge])
+check("options: notifications without a badge rule ask for alerts and sounds",
+      DockBadgePermission.options(notifications: true, badgeRule: false) == [.alert, .sound])
+check("options: no notifications ask for nothing",
+      DockBadgePermission.options(notifications: false, badgeRule: true).isEmpty
+        && DockBadgePermission.options(notifications: false, badgeRule: false).isEmpty)
+check("badge: off once notifications are allowed without badges",
+      DockBadgePermission.isOff(badgeRule: true, authorization: .authorized, badge: .disabled)
+        && DockBadgePermission.isOff(badgeRule: true, authorization: .authorized, badge: .notSupported))
+check("badge: on when badges are allowed too", !DockBadgePermission.isOff(badgeRule: true, authorization: .authorized, badge: .enabled))
+check("badge: not mentioned before macOS is asked or once it refuses",
+      !DockBadgePermission.isOff(badgeRule: true, authorization: .notDetermined, badge: .notSupported)
+        && !DockBadgePermission.isOff(badgeRule: true, authorization: .denied, badge: .disabled))
+check("badge: never mentioned for a site without a badge rule",
+      !DockBadgePermission.isOff(badgeRule: false, authorization: .authorized, badge: .notSupported))
+check("badge: asked for again when allowed without ever asking for badges",
+      DockBadgePermission.needsRequest(badgeRule: true, authorization: .authorized, badge: .notSupported))
+check("badge: never asked for by a site without a badge rule",
+      !DockBadgePermission.needsRequest(badgeRule: false, authorization: .authorized, badge: .notSupported))
+check("badge: not asked again once macOS has an answer for badges",
+      !DockBadgePermission.needsRequest(badgeRule: true, authorization: .authorized, badge: .disabled)
+        && !DockBadgePermission.needsRequest(badgeRule: true, authorization: .authorized, badge: .enabled))
+check("badge: not asked for before notifications are allowed",
+      !DockBadgePermission.needsRequest(badgeRule: true, authorization: .notDetermined, badge: .notSupported)
+        && !DockBadgePermission.needsRequest(badgeRule: true, authorization: .denied, badge: .notSupported))
+check("badge: the log's words for each setting",
+      [NotificationSetting.notSupported, .disabled, .enabled].map(\.rawValue) == ["not supported", "disabled", "enabled"])
 
 func noteParse(_ json: String) -> Result<NotificationMessage, NotificationRefusal> {
     NotificationMessage.parse(try? JSONSerialization.jsonObject(with: Data(json.utf8)))

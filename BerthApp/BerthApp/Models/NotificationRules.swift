@@ -15,6 +15,39 @@ enum NotificationAuthorization: Equatable {
     }
 }
 
+/// `UNNotificationSetting`, without UserNotifications. `notSupported` is what
+/// macOS reports for an option the app never asked for.
+enum NotificationSetting: String, Equatable {
+    case notSupported = "not supported", disabled, enabled
+}
+
+/// `UNAuthorizationOptions`' members, without UserNotifications.
+enum NotificationOption: Hashable {
+    case alert, sound, badge
+}
+
+/// Inferred from the Dock: once an app has notification permission, macOS
+/// shows its Dock badge only while Badges is allowed too. OBSERVED (macOS 26):
+/// an app allowed without asking for badges has no Badges row in Settings.
+/// Only a site with a badge rule (`badge.title`) ever asks for badges.
+enum DockBadgePermission {
+    /// What the app asks macOS for, from the site's config.
+    static func options(notifications: Bool, badgeRule: Bool) -> Set<NotificationOption> {
+        guard notifications else { return [] }
+        return badgeRule ? [.alert, .sound, .badge] : [.alert, .sound]
+    }
+
+    /// Settings says the Dock badge is off.
+    static func isOff(badgeRule: Bool, authorization: NotificationAuthorization, badge: NotificationSetting) -> Bool {
+        badgeRule && authorization == .authorized && badge != .enabled
+    }
+
+    /// Allowed before the app asked for badges: ask again with them, once.
+    static func needsRequest(badgeRule: Bool, authorization: NotificationAuthorization, badge: NotificationSetting) -> Bool {
+        badgeRule && authorization == .authorized && badge == .notSupported
+    }
+}
+
 /// The web's `NotificationPermission` strings.
 enum NotificationPermission: String, Equatable {
     case `default`, denied, granted

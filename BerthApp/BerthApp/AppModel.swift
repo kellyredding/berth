@@ -132,6 +132,8 @@ final class AppModel: ObservableObject {
         signinBar.configure(name: config.name, signin: config.signin, keep: config.keep, at: Date())
         notifier.enabled = config.notifications
         notifier.keep = config.keep
+        notifier.badgeRule = config.badge?.title != nil
+        notifier.requestBadgeIfNeeded()
 
         if mainWindow == nil { createMainWindow(config) }
         refreshNotificationShim()
@@ -303,6 +305,9 @@ final class AppModel: ObservableObject {
     /// Pages already open learn the new permission at once; new ones get it
     /// from the shim.
     private func notificationPermissionChanged() {
+        // Set again: a badge macOS hid while Badges was off shows now, not at
+        // the title's next change.
+        NSApp.dockTile.badgeLabel = badge
         refreshNotificationShim()
         guard configStore.config?.notifications == true else { return }
         let permission = notifier.authorization.pagePermission.rawValue

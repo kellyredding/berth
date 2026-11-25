@@ -14,9 +14,13 @@ final class Notifier: NSObject, ObservableObject {
     private static let refusalLogInterval: TimeInterval = 10
 
     @Published private(set) var authorization: NotificationAuthorization = .notDetermined
+    @Published private(set) var badgeSetting: NotificationSetting = .notSupported
     /// From the site's config: whether its pages may notify, and from where.
     var enabled = false
     var keep = KeepList([])
+    /// Whether the site sets `badge.title`, the only reason to ask for badges.
+    var badgeRule = false
+    /// macOS's answer for notifications, or for badges, changed.
     var onAuthorizationChange: (() -> Void)?
     /// A notification was clicked: the web view that posted it, if it is
     /// still open, and the page's id for it, if the app still knows it.
@@ -26,6 +30,7 @@ final class Notifier: NSObject, ObservableObject {
     private var limit = NotificationRateLimit()
     private var targets = NotificationTargets<WKWebView>()
     private var isAsking = false
+    private var askedForBadge = false
     private var waitingForAnswer: [(NotificationPermission) -> Void] = []
     private var refusalsLogged: [String: Date] = [:]
     private var activation: NSObjectProtocol?
@@ -49,15 +54,15 @@ final class Notifier: NSObject, ObservableObject {
     func refreshAuthorization() {
         Task { [weak self] in
             guard let self else { return }
-            let settings = await self.center.notificationSettings()
-            self.authorizationChanged(Self.authorization(settings.authorizationStatus))
+            self.settingsChanged(await self.center.notificationSettings())
         }
     }
 
     /// Asks macOS, which shows its prompt only the first time; every later
     /// call gets the answer it gave.
     func requestAuthorization(_ answer: ((NotificationPermission) -> Void)? = nil) {
-        guard authorization == .notDetermined else {
+        let options = Self.options(DockBadgePermission.options(notifications: enabled, badgeRule: badgeRule))
+        guard authorization == .notDetermined, !options.isEmpty else {
             answer?(authorization.pagePermission)
             return
         }
@@ -68,12 +73,11 @@ final class Notifier: NSObject, ObservableObject {
         Task { [weak self] in
             guard let self else { return }
             do {
-                _ = try await self.center.requestAuthorization(options: [.alert, .sound])
+                _ = try await self.center.requestAuthorization(options: options)
             } catch {
                 Log.error("notification: macOS refused the request: \(error.localizedDescription)")
             }
-            let settings = await self.center.notificationSettings()
-            self.authorizationChanged(Self.authorization(settings.authorizationStatus))
+            self.settingsChanged(await self.center.notificationSettings())
             self.isAsking = false
             let answers = self.waitingForAnswer
             self.waitingForAnswer = []
@@ -86,11 +90,66 @@ final class Notifier: NSObject, ObservableObject {
         NSWorkspace.shared.open(url)
     }
 
-    private func authorizationChanged(_ value: NotificationAuthorization) {
-        guard value != authorization else { return }
+    /// An app allowed to notify before it asked for badges never gets them
+    /// from the page's or Settings' request, which asks only when macOS has no
+    /// answer yet, so a site with a badge rule asks with badges once at launch.
+    /// INFERRED, not confirmed: macOS adds the option without a full prompt.
+    func requestBadgeIfNeeded() {
+        guard enabled, badgeRule, !askedForBadge else { return }
+        askedForBadge = true
+        Task { [weak self] in
+            guard let self else { return }
+            let before = await self.center.notificationSettings()
+            guard DockBadgePermission.needsRequest(
+                badgeRule: self.badgeRule,
+                authorization: Self.authorization(before.authorizationStatus), badge: Self.setting(before.badgeSetting)
+            ) else { return }
+            let options = Self.options(DockBadgePermission.options(notifications: self.enabled, badgeRule: self.badgeRule))
+            do {
+                _ = try await self.center.requestAuthorization(options: options)
+            } catch {
+                Log.error("notification: macOS refused the badge request: \(error.localizedDescription)")
+            }
+            let after = await self.center.notificationSettings()
+            Log.info("notification: asked macOS for badges; Badges is \(Self.setting(after.badgeSetting).rawValue)")
+            self.settingsChanged(after)
+        }
+    }
+
+    private func settingsChanged(_ settings: UNNotificationSettings) {
+        let badge = Self.setting(settings.badgeSetting)
+        let badgeChanged = badge != badgeSetting
+        if badgeChanged { badgeSetting = badge }
+        if !authorizationChanged(Self.authorization(settings.authorizationStatus)) && badgeChanged {
+            onAuthorizationChange?()
+        }
+    }
+
+    private static func options(_ wanted: Set<NotificationOption>) -> UNAuthorizationOptions {
+        var options: UNAuthorizationOptions = []
+        if wanted.contains(.alert) { options.insert(.alert) }
+        if wanted.contains(.sound) { options.insert(.sound) }
+        if wanted.contains(.badge) { options.insert(.badge) }
+        return options
+    }
+
+    private static func setting(_ value: UNNotificationSetting) -> NotificationSetting {
+        switch value {
+        case .enabled: return .enabled
+        case .disabled: return .disabled
+        case .notSupported: return .notSupported
+        @unknown default: return .disabled
+        }
+    }
+
+    /// Whether it changed, and so already told onAuthorizationChange.
+    @discardableResult
+    private func authorizationChanged(_ value: NotificationAuthorization) -> Bool {
+        guard value != authorization else { return false }
         authorization = value
         Log.info("notification: macOS permission is \(value.pagePermission.rawValue)")
         onAuthorizationChange?()
+        return true
     }
 
     private static func authorization(_ status: UNAuthorizationStatus) -> NotificationAuthorization {
